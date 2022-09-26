@@ -1,26 +1,43 @@
 # Databricks notebook source
+!pip install gemmi
+
+# COMMAND ----------
+
 !pip install biopython
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC drop TABLE IF EXISTS config_pdb_actualizer;
-# MAGIC CREATE TABLE config_pdb_actualizer as select '4HHB' as data union select '4HHA' as data;
-
-# COMMAND ----------
-
-# MAGIC %sql
+# MAGIC CREATE TABLE config_pdb_actualizer as 
+# MAGIC   select '4HHB' as data union select '4HHA' as data;
 # MAGIC SELECT * FROM config_pdb_actualizer;
 
 # COMMAND ----------
 
-with open('/tmp/test.txt','w') as f:
-    f.write('123')
 
-# COMMAND ----------
 
-onlyfiles =  os.listdir('/tmp')
-print(onlyfiles)
+
+folder_path = "/dbfs/user/evgeniy.varganov@quantori.com/"
+path = folder_path+'4hhb.cif'
+
+
+print(block.find_pair_item('_entry.id').pair[1])
+print(block.find_pair_item('_exptl.method').pair)
+
+for col_name in block.get_mmcif_category('_chem_comp'):
+    print(col_name)
+
+for row in block.find_mmcif_category('_chem_comp'):
+    for cell in row:
+        if cif.is_null(cell):
+            print('None', end = '\t')
+        else:
+            print(cell, end = '\t')
+    print()
+
+
+
 
 # COMMAND ----------
 
@@ -28,96 +45,111 @@ import os
 import urllib.request
 import gzip
 import shutil
+#from Bio.PDB.MMCIFParser import MMCIFParser
+#from Bio.PDB import MMCIF2Dict;
+import json
+from gemmi import cif
+from pyspark.sql.types import StructType, StructField, StringType
 
+
+#parser = MMCIFParser()
 #print(os.getcwd())
+folder_path = "/dbfs/user/evgeniy.varganov@quantori.com/"
+molecule_df = spark.read.table('config_pdb_actualizer').select('data').collect()
 
-molecule_df = spark.read.table('config_pdb_actualizer')
-for m in molecule_df.select('data').collect():
+fields = {  '_entity':[],
+            '_pdbx_database_PDB_obs_spr':[],
+            '_entity_poly_seq':[],
+            '_chem_comp':[]}
+
+df_dict = {}
+
+extra_data = ['_exptl.entry_id','_exptl.method']
+
+for m in molecule_df:
     molecule = m.data.lower()
-    print(molecule)
-    file_name = f"/tmp/{molecule}.cif.gz"
+    
+    gz_file_name = f"{folder_path}{molecule}.cif.gz"
+    file_name = gz_file_name[:-len('.gz')]
     url = f'https://files.wwpdb.org/pub/pdb/data/structures/all/mmCIF/{molecule}.cif.gz'
-    urllib.request.urlretrieve(url, file_name)
-    with gzip.open(file_name, 'rb') as f_in:
-        with open(file_name[:-len('.gz')], 'wb') as f_out:
+    urllib.request.urlretrieve(url, gz_file_name)
+    with gzip.open(gz_file_name, 'rb') as f_in:
+        with open(file_name, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
+    os.remove(gz_file_name)
+
+    doc = cif.read_file(file_name)  # copy all the data from mmCIF file
+    block = doc.sole_block()  # mmCIF has exactly one block
     
+    for table in fields.keys():
+        for col_name in block.get_mmcif_category(table):
+            if col_name not in fields[table]:
+                fields[table].append(col_name)
+    
+    for table, f in fields.items():      
+        columns = ['experiment']
+        columns.extend(f)
+        df_data = []
+        
+        for row in block.find_mmcif_category(table):
+            df_row = [molecule]
+            for cell in row:
+                if cif.is_null(cell):
+                    df_row.append(None)
+                else:
+                    df_row.append(cell)
+            df_data.append(df_row)
+        
+        schema = []
+        for fld in columns:
+            schema.append(StructField(fld, StringType(), True))
+        df = spark.createDataFrame(df_data, schema=StructType(schema))
+        if table not in df_dict:
+            df_dict[table] = df
+        else:
+            df_dict[table] = df_dict[table].union(df)
+        print(molecule,table)
+    
+    table = '_extra'
+    schema = [StructField('experiment', StringType(), False)]
+    df_row = [molecule]
+    
+    for field in extra_data:
+        schema.append(StructField(field, StringType(), True))
+        df_row.append(block.find_pair_item(field).pair[1])
+    df = spark.createDataFrame([df_row], schema=StructType(schema))
+    if table not in df_dict:
+        df_dict[table] = df
+    else:
+        df_dict[table] = df_dict[table].union(df)
+
+for k,v in df_dict.items():
+    display(v)
     
 
-    
-    
+# COMMAND ----------
+
+from pathlib import Path
+data_path = f"{folder_path}data/"
+Path(path).mkdir(parents=True, exist_ok=True)
+path_list = {}
+for k,v in df_dict.items():
+    path = data_path+k
+    print(path)
+    v.write.format("delta").mode("overwrite").save(path)
+    path_list[k] = path
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
-from Bio.PDB.MMCIFParser import MMCIFParser
-parser = MMCIFParser()
-structure = parser.get_structure('4hhb', '/tmp/4hhb.cif')
-
-
-
-# COMMAND ----------
-
-_exptl_entry_id =structure.id
-
-# COMMAND ----------
-
-help(structure)
-structure
-
-# COMMAND ----------
-
-import Bio
-data = Bio.PDB.MMCIF2Dict.MMCIF2Dict('/tmp/4hhb.cif')
-data = dict(data)
-fields = {'_entity.':[],
-'_pdbx_database_PDB_obs_spr.':[],
-'_entity_poly_seq.':[],
-'_chem_comp.':[]}
-
-for k,v in data.items():
-    for t in fields.keys():
-        if k.startswith(t):
-            fields[t].append(k)
-df_list = []
-for table, f in fields.items():
-    columns = [x[len(table):] for x in f]
-    df_data = []
-    for i in range(len(data[f[0]])):
-        row = []
-        for j in f:
-            row.append(data[j][i])
-        df_data.append(row)
-    df = spark.createDataFrame(df_data, columns)
+for table_name, path in path_list.items():
+    #df = spark.read.format("delta").load(p)
     #display(df)
-    df_list.append(df)
-
-    
-print(columns)
-print(json.dumps(fields, indent=4))            
-
+    spark.sql(f'CREATE TABLE IF NOT EXISTS bronze{table_name} USING delta OPTIONS (path "{p}");')
 
 # COMMAND ----------
 
-import json 
-data = dict(data)
-print(json.dumps(data, indent =4))
-
-# COMMAND ----------
-
-os.chdir('PDB_proj')
-print(os.listdir(os.getcwd()))
-
-# COMMAND ----------
-
-print(os.getcwd())
-
-# COMMAND ----------
-
-
+# MAGIC %sql
+# MAGIC select * from bronze_extra
 
 # COMMAND ----------
 
