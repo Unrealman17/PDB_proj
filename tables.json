@@ -1,0 +1,30 @@
+{
+    "pdb_actualizer": {
+        "config": [
+            "experiment string"
+        ],
+        "history": [
+            "id BIGINT GENERATED ALWAYS AS IDENTITY",
+            "begin timestamp",
+            "end timestamp"
+        ],
+        "register": [
+            "id_history BIGINT",
+            "experiment string",
+            "checksum string"
+        ]
+    },
+    "data": {
+        "tables": [
+            "chem_comp",
+            "entity_poly_seq",
+            "pdbx_database_PDB_obs_spr",
+            "entity",
+            "extra"
+        ],
+        "layers": [
+            "bronze",
+            "silver"
+        ]
+    }
+}

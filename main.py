@@ -16,7 +16,7 @@ TODO:
 
 # COMMAND ----------
 
-!pip install gemmi
+# !pip install gemmi
 
 # COMMAND ----------
 
@@ -37,6 +37,7 @@ import hashlib
 from pathlib import Path
 from pathlib import PurePath
 
+from helper import spark
 # COMMAND ----------
 
 '''
