@@ -1,0 +1,12 @@
+{
+    "tables": [
+        "chem_comp",
+        "entity_poly_seq",
+        "pdbx_database_PDB_obs_spr",
+        "entity"
+    ],
+    "extra": [
+        "_exptl.entry_id",
+        "_exptl.method"
+    ]
+}

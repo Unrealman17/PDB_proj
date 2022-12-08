@@ -6,6 +6,7 @@ TODO:
     3 |0| прикрутить storage аккаунт
     4 |+| сделать чтение списка экспериментов из файла
     5 |0| создать отдельный джоб и запустить код на нем
+    6 использовать заголовок ETag через HEAD запрос
 '''
 '''
     1 загрузка, разархивирование файлов
@@ -13,19 +14,12 @@ TODO:
     change data capture протестить SELECT * FROM table_change('table_name',3,4)
         describe history table_name
 '''
-
-# COMMAND ----------
-
-# !pip install gemmi
-
-# COMMAND ----------
-
-# MAGIC %run ./install
-
-# COMMAND ----------
-
 import time
+from datetime import datetime
+from install import Tables_config
 start_time = time.time()
+start_ts = datetime.now()
+from pyspark.sql import functions as pyspark_f
 import os
 import urllib.request
 import gzip
@@ -38,68 +32,52 @@ from pathlib import Path
 from pathlib import PurePath
 
 from helper import spark
-# COMMAND ----------
 
 '''
     read file "input.txt" with experiment list to process
 '''
 input_path = 'input.txt'
-url = 'https://drive.google.com/uc?id=1f2cMzmaAV7NHPgIMrJbdHZQMRXPo1qWb&export=download'
-urllib.request.urlretrieve(url, input_path)
+# url = 'https://drive.google.com/uc?id=1f2cMzmaAV7NHPgIMrJbdHZQMRXPo1qWb&export=download'
+# urllib.request.urlretrieve(url, input_path)
 with open(input_path)as f:
     txt = f.read()
 experiments = txt.split('\n')
 cmd = """
-insert into config_pdb_actualizer(experiment) values\n('""" \
-+ "'),\n('".join(txt.strip().split('\n')) \
-+ "');"
+    insert into config_pdb_actualizer(experiment) values\n('""" \
+    + "'),\n('".join(txt.strip().split('\n')) \
+    + "');"
 spark.sql("truncate table config_pdb_actualizer;")
-inserted = spark.sql(cmd).collect()[0].num_inserted_rows
+inserted = spark.sql(cmd).collect()
+inserted = spark.sql("select count(*) from config_pdb_actualizer;").collect()[0][0]
 print(f'Read {inserted} strings')
 
-# COMMAND ----------
+# start pipeline
+spark.sql("""insert into history_pdb_actualizer(begin,end)
+                select now(), null;""")
 
-# MAGIC %sql
-# MAGIC -- SELECT * FROM config_pdb_actualizer;
-
-# COMMAND ----------
-
-# MAGIC %sql 
-# MAGIC insert into history_pdb_actualizer(begin,end)
-# MAGIC   select now(), null;
-# MAGIC SELECT * FROM history_pdb_actualizer;
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC -- delete FROM register_pdb_actualizer where checksum is null;
-# MAGIC SELECT * FROM register_pdb_actualizer;
-# MAGIC --SELECT max(id) FROM history_pdb_actualizer;
-
-# COMMAND ----------
-
-folder_path = "/dbfs/user/evgeniy.varganov@quantori.com/"
+# folder_path = "/dbfs/user/evgeniy.varganov@quantori.com/"
 molecule_df = spark.read.table('config_pdb_actualizer').select('experiment').collect()
 
-fields = {  '_entity':[],
-            '_pdbx_database_PDB_obs_spr':[],
-            '_entity_poly_seq':[],
-            '_chem_comp':[]}
+with open('config.json') as f:
+    config = f.read()
+config = json.loads(config)
+
+fields = {f'_{name}':[] for name in config["tables"]}
+extra_data = config["extra"]
 
 df_dict = {}
 schema_dict = {}
 
-extra_data = ['_exptl.entry_id','_exptl.method']
 
-log_experiment_df = spark.sql('select id_history, experiment, checksum from register_pdb_actualizer;')
-current_experiments = spark.createDataFrame([],schema=log_experiment_df.schema)
-checksum_dict = {i.experiment: i.checksum for i in log_experiment_df.collect()}
+register_df = spark.sql('select history_begin, experiment, checksum from register_pdb_actualizer;')
+current_experiments = spark.createDataFrame([],schema=register_df.schema)
+checksum_dict = {i.experiment: i.checksum for i in register_df.collect()}
 
 print(checksum_dict)
 
 for m in molecule_df:
     exprmnt = m.experiment
-    tmp_path = f"{folder_path}downloads/"
+    tmp_path = f"downloads/"
     Path(tmp_path).mkdir(parents=True, exist_ok=True)
     
     gz_file_name = f"{tmp_path}{exprmnt}.cif.gz"
@@ -175,9 +153,9 @@ for k,v in schema_dict.items():
     df_dict[k] = spark.createDataFrame(df_dict[k], schema=v)
 
 
-id_history = spark.sql('SELECT max(id) as id FROM history_pdb_actualizer;').collect()[0].id
-df_data = [[id_history,k,v] for k,v in checksum_dict.items()]
-spark.createDataFrame(df_data,schema=log_experiment_df.schema).createOrReplaceTempView('tmp_register_pdb_actualizer')
+
+df_data = [[start_ts,k,v] for k,v in checksum_dict.items()]
+spark.createDataFrame(df_data,schema=register_df.schema).createOrReplaceTempView('tmp_register_pdb_actualizer')
 print(checksum_dict)
 
 # COMMAND ----------
@@ -208,24 +186,24 @@ print(checksum_dict)
 # COMMAND ----------
 
 # переделать на регистрацию temp view
-data_path = f"{folder_path}bronze/"
-Path(data_path).mkdir(parents=True, exist_ok=True)
-path_list = {}
+# data_path = f"{folder_path}bronze/"
+# Path(data_path).mkdir(parents=True, exist_ok=True)
+# path_list = {}
 for k,v in df_dict.items():
-    path = data_path+k
-    print(path)
+    # path = data_path+k
+    # print(path)
     v.createOrReplaceTempView(f'tmp_bronze{k}')
     # dbutils.fs.rm(path, recurse=True)
     # v.repartition(1).write.format("delta").mode("overwrite").save(path)
-    path_list[k] = path
+    # path_list[k] = path
 
 # COMMAND ----------
 
-dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_entity/", True)
-dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_entity_poly_seq/", True)
-dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_chem_comp/", True)
-dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_extra/", True)
-dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_pdbx_database_pdb_obs_spr/", True)
+# dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_entity/", True)
+# dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_entity_poly_seq/", True)
+# dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_chem_comp/", True)
+# dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_extra/", True)
+# dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_pdbx_database_pdb_obs_spr/", True)
 
 # COMMAND ----------
 
@@ -239,7 +217,7 @@ dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_pdbx_database_pdb_obs_spr/", Tru
 
 # COMMAND ----------
 
-for table_name, path in path_list.items():
+for table_name in df_dict.keys():
     #df = spark.read.format("delta").load(p)
     print(table_name)
     spark.sql(f'DROP TABLE IF EXISTS bronze{table_name};')
@@ -282,7 +260,7 @@ for table_name, path in path_list.items():
 
 # COMMAND ----------
 
-print("--- %s seconds ---" % (time.time() - start_time))
+# print("--- %s seconds ---" % (time.time() - start_time))
 
 # COMMAND ----------
 

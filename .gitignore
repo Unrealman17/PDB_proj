@@ -1,3 +1,6 @@
 metastore_db/
 __pycache__/
 derby.log
+downloads/
+hive/
+

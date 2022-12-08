@@ -4,12 +4,11 @@
             "experiment string"
         ],
         "history": [
-            "id BIGINT GENERATED ALWAYS AS IDENTITY",
             "begin timestamp",
             "end timestamp"
         ],
         "register": [
-            "id_history BIGINT",
+            "history_begin timestamp",
             "experiment string",
             "checksum string"
         ]
