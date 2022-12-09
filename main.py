@@ -32,10 +32,14 @@ from pathlib import Path
 from pathlib import PurePath
 
 from helper import spark
-
+from install import install
 '''
     read file "input.txt" with experiment list to process
 '''
+install(spark)
+
+b_tables = Tables_config().bronze_tables()
+
 input_path = 'input.txt'
 # url = 'https://drive.google.com/uc?id=1f2cMzmaAV7NHPgIMrJbdHZQMRXPo1qWb&export=download'
 # urllib.request.urlretrieve(url, input_path)
@@ -59,8 +63,7 @@ spark.sql("""insert into history_pdb_actualizer(begin,end)
 molecule_df = spark.read.table('config_pdb_actualizer').select('experiment').collect()
 
 with open('config.json') as f:
-    config = f.read()
-config = json.loads(config)
+    config = json.load(f)
 
 fields = {f'_{name}':[] for name in config["tables"]}
 extra_data = config["extra"]
@@ -160,30 +163,19 @@ print(checksum_dict)
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC MERGE INTO register_pdb_actualizer m
-# MAGIC USING tmp_register_pdb_actualizer t
-# MAGIC ON m.experiment = t.experiment
-# MAGIC WHEN MATCHED THEN
-# MAGIC   UPDATE SET
-# MAGIC     id_history = t.id_history,
-# MAGIC     checksum = t.checksum,
-# MAGIC     experiment = t.experiment
-# MAGIC WHEN NOT MATCHED
-# MAGIC   THEN INSERT *;
-# MAGIC   
-# MAGIC drop view tmp_register_pdb_actualizer;
-# MAGIC ----------------------
-# MAGIC SELECT * FROM register_pdb_actualizer;
-
-# COMMAND ----------
-
-#for k,v in df_dict.items():
-#    print(k)
-#    #print(v.columns)
-#    display(v)
-
-# COMMAND ----------
+spark.sql('''
+            MERGE INTO register_pdb_actualizer m
+            USING tmp_register_pdb_actualizer t
+            ON m.experiment = t.experiment
+            WHEN MATCHED THEN
+            UPDATE SET
+                history_begin = t.history_begin,
+                checksum = t.checksum,
+                experiment = t.experiment
+            WHEN NOT MATCHED
+            THEN INSERT *;''')
+  
+spark.sql('DROP VIEW tmp_register_pdb_actualizer;')
 
 # переделать на регистрацию temp view
 # data_path = f"{folder_path}bronze/"
@@ -198,51 +190,20 @@ for k,v in df_dict.items():
     # path_list[k] = path
 
 # COMMAND ----------
-
-# dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_entity/", True)
-# dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_entity_poly_seq/", True)
-# dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_chem_comp/", True)
-# dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_extra/", True)
-# dbutils.fs.rm("dbfs:/user/hive/warehouse/bronze_pdbx_database_pdb_obs_spr/", True)
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC -- SELECT * FROM tmp_bronze_entity;
-# MAGIC -- OPTIMIZE tmp_bronze_entity;
-# MAGIC -- optimize tmp_bronze_entity_poly_seq;
-# MAGIC -- optimize tmp_bronze_chem_comp;
-# MAGIC -- optimize tmp_bronze_extra;
-# MAGIC -- optimize tmp_bronze_pdbx_database_pdb_obs_spr;
-
-# COMMAND ----------
-
+# TODO использовать одну структуру хранения информации о таблицах
 for table_name in df_dict.keys():
     #df = spark.read.format("delta").load(p)
     print(table_name)
+    spark.sql(f'OPTIMIZE tmp_bronze{table_name};')
     spark.sql(f'DROP TABLE IF EXISTS bronze{table_name};')
-    spark.sql(f'CREATE TABLE IF NOT EXISTS bronze{table_name} as select * from tmp_bronze{table_name};')
-    spark.sql(f'DROP view IF EXISTS tmp_bronze{table_name};')
+    spark.sql(f'''
+                CREATE TABLE IF NOT EXISTS bronze{table_name} 
+                as 
+                SELECT * FROM tmp_bronze{table_name};''')
+    spark.sql(f'DROP VIEW IF EXISTS tmp_bronze{table_name};')
 
 print("--- %s seconds ---" % (time.time() - start_time))
 
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC -- SELECT * FROM bronze_entity;
-
-# COMMAND ----------
-
-'''
-for table_name, path in path_list.items():
-    #df = spark.read.format("delta").load(p)
-    print(table_name)
-    spark.sql(f'DROP TABLE IF EXISTS bronze{table_name};')
-    spark.sql(f'CREATE TABLE IF NOT EXISTS bronze{table_name} USING delta OPTIONS (path "{path}");')
-    #spark.sql(f"insert into bronze{table_name} select * from tmp{table_name};")
-    #spark.sql(f'DROP TABLE IF EXISTS tmp{table_name};')
-    
-'''
 
 # COMMAND ----------
 
