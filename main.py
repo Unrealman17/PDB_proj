@@ -6,7 +6,7 @@ TODO:
     3 |0| прикрутить storage аккаунт
     4 |+| сделать чтение списка экспериментов из файла
     5 |0| создать отдельный джоб и запустить код на нем
-    6 использовать заголовок ETag через HEAD запрос
+    6 |0| использовать заголовок ETag через HEAD запрос
 '''
 '''
     1 загрузка, разархивирование файлов
@@ -184,7 +184,12 @@ spark.sql('DROP VIEW tmp_register_pdb_actualizer;')
 for k,v in df_dict.items():
     # path = data_path+k
     # print(path)
-    v.createOrReplaceTempView(f'tmp_bronze{k}')
+    table_name = f'tmp_bronze{k}'
+    v.createOrReplaceTempView(table_name)
+    # почему-то не работает: Table or view 'tmp_bronze_chem_comp' not found in database 'default'
+    # spark.sql(f'OPTIMIZE {table_name};') 
+
+
     # dbutils.fs.rm(path, recurse=True)
     # v.repartition(1).write.format("delta").mode("overwrite").save(path)
     # path_list[k] = path
@@ -194,7 +199,6 @@ for k,v in df_dict.items():
 for table_name in df_dict.keys():
     #df = spark.read.format("delta").load(p)
     print(table_name)
-    spark.sql(f'OPTIMIZE tmp_bronze{table_name};')
     spark.sql(f'DROP TABLE IF EXISTS bronze{table_name};')
     spark.sql(f'''
                 CREATE TABLE IF NOT EXISTS bronze{table_name} 
