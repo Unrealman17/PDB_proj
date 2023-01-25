@@ -8,5 +8,8 @@
     "extra": [
         "_exptl.entry_id",
         "_exptl.method"
-    ]
+    ],
+    "download_thread": 4,
+    "downloads_path" : "/home/e/proj/pdb_proj/downloads/",
+    "table_path": "/home/e/proj/pdb_proj/external/"
 }

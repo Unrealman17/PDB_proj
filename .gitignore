@@ -4,3 +4,7 @@ derby.log
 downloads/
 hive/
 
+.dbx/
+
+external/
+

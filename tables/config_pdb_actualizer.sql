@@ -1,3 +1,4 @@
 create table config_pdb_actualizer(
-    experiment string
+    experiment string,
+    thread int
 ) using csv;
