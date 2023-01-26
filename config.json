@@ -11,5 +11,6 @@
     ],
     "download_thread": 4,
     "downloads_path" : "/home/e/proj/pdb_proj/downloads/",
-    "table_path": "/home/e/proj/pdb_proj/external/"
+    "table_path": "/home/e/proj/pdb_proj/external/",
+    "buffer_size_per_table": 8192
 }

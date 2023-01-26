@@ -2,6 +2,7 @@
 import json
 from pyspark.sql import SparkSession
 import os
+import sys
 from pdb_helper import read_config, task
 from gemmi import cif
 from pyspark.sql.types import StructType, StructField, StringType
@@ -9,14 +10,21 @@ from pyspark.sql.types import StructType, StructField, StringType
 # dbx execute --cluster-id=1108-081632-vxq32gz9 install --no-package
 # dbx sync dbfs --source .
 
+config = read_config()
+
+
+
 class Table:
+
+    buffer_size_per_table = config["buffer_size_per_table"]
 
     def __init__(self, 
                     name:str, 
                     dml: str = None, 
                     exist: bool = None, 
                     spark_context: SparkSession = None,
-                    external_location = None
+                    external_location = None,
+                    category: str = None
     ) -> None:
         self.name = name
         self.external_location = external_location
@@ -37,6 +45,40 @@ class Table:
         self.exist = exist
         self._spark_context = spark_context
         self.schema = None
+        self.category = category
+        self.data = []
+        self.dataframe = None
+
+    def append(self, row: list):
+        self.data.append(row)
+        if Table.buffer_size_per_table < sys.getsizeof(self.data):
+            self.build_dataframe
+
+    def build_dataframe(self):
+        if not self.dataframe:
+            self.dataframe = self._spark_context.createDataFrame(self.data, schema=self.schema)
+        else:
+            new_df = self._spark_context.createDataFrame(self.data, schema=self.schema)
+            self.dataframe = self.dataframe.union(new_df)
+            self.data = []
+
+    def write(self):
+        spark = self.spark_context
+        table_name = self.name
+        self.build_dataframe()
+        self.dataframe.createOrReplaceTempView(f'tmp_{table_name}')
+        spark.sql(f'DROP TABLE IF EXISTS {table_name};')
+        if self.external_location:
+            cmd = f'''CREATE EXTERNAL TABLE {table_name}
+                    like tmp_{table_name}
+                    LOCATION '{self.external_location}{self.name}';'''
+        else:
+            cmd = f'''CREATE TABLE {table_name} 
+                    as
+                    SELECT * FROM tmp_{table_name};'''
+
+        spark.sql(cmd)
+        spark.sql(f'DROP VIEW IF EXISTS tmp_{table_name};')
 
     def __str__(self) -> str:
         return self.name
@@ -91,9 +133,17 @@ class Tables_config:
                     elif table.name.startswith('register'):
                         self.register_table = table
 
-        self.data = [Table(f'{l}_{t}', spark_context=spark_context)
+        self.data = [Table(f'{l}_{t}', spark_context=spark_context, category='_'+t, external_location=config['table_path'])
                      for l in ["bronze", "silver"]
                      for t in config["tables"]]
+
+        for table in self.data:
+            if table.name == 'bronze_extra':
+                table.schema = StructType([StructField(fld, StringType(), True) 
+                            for fld in config['extra']])
+                table.schema.add('experiment',StringType(), True)
+                self.bronze_extra = table
+                break
 
     def tables(self) -> list:
         for table in self.service:
@@ -101,6 +151,11 @@ class Tables_config:
         for table in self.data:
             yield table
     
+    def bronze_category_tables(self) -> list[Table]:
+        for table in self.bronze_tables():
+            if self.bronze_extra.name != table.name:
+                yield table
+
     def bronze_tables(self) -> list[Table]:
         for table in self.data:
             if table.name.startswith("bronze"):
@@ -115,12 +170,16 @@ class Tables_config:
 
         if file_name:
             block = cif.read_file(file_name).sole_block()  # mmCIF has exactly one block
-
-        for table in self.bronze_tables():
-            table.schema = StructType([StructField(fld, StringType(), True) 
-                        for fld in block.get_mmcif_category(table.name)])
-            if len(table.schema) != 0:
-                table.schema.add('id_log_experiment',StringType(), True)
+        
+        for table in self.bronze_category_tables():
+            if not table.schema:
+                schema = StructType([StructField(fld, StringType(), True) 
+                            for fld in block.get_mmcif_category(table.category)])
+                if len(schema) != 0:
+                    schema.add('id_log_experiment',StringType(), True)
+                    
+                    table.schema = schema
+            
 
 
 
