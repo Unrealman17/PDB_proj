@@ -6,6 +6,7 @@ import sys
 from pdb_helper import read_config, task
 from gemmi import cif
 from pyspark.sql.types import StructType, StructField, StringType
+import shutil
 
 # dbx execute --cluster-id=1108-081632-vxq32gz9 install --no-package
 # dbx sync dbfs --source .
@@ -27,7 +28,7 @@ class Table:
                     category: str = None
     ) -> None:
         self.name = name
-        self.external_location = external_location
+        self.external_location = external_location + self.name
         if self.external_location and dml:
             create_table = 'create table '
             lower = dml.lower()
@@ -39,7 +40,7 @@ class Table:
                 dml = dml[:start] \
                         + 'CREATE EXTERNAL TABLE '\
                         + dml[finish:end]\
-                        + f" LOCATION '{external_location}{os.sep}{self.name}';"
+                        + f" LOCATION '{self.external_location}';"
 
         self.dml = dml
         self.exist = exist
@@ -52,7 +53,7 @@ class Table:
     def append(self, row: list):
         self.data.append(row)
         if Table.buffer_size_per_table < sys.getsizeof(self.data):
-            self.build_dataframe
+            self.build_dataframe()
 
     def build_dataframe(self):
         if not self.dataframe:
@@ -60,25 +61,30 @@ class Table:
         else:
             new_df = self._spark_context.createDataFrame(self.data, schema=self.schema)
             self.dataframe = self.dataframe.union(new_df)
-            self.data = []
+        self.data = []
 
     def write(self):
-        spark = self.spark_context
-        table_name = self.name
-        self.build_dataframe()
-        self.dataframe.createOrReplaceTempView(f'tmp_{table_name}')
-        spark.sql(f'DROP TABLE IF EXISTS {table_name};')
-        if self.external_location:
-            cmd = f'''CREATE EXTERNAL TABLE {table_name}
-                    like tmp_{table_name}
-                    LOCATION '{self.external_location}{self.name}';'''
-        else:
-            cmd = f'''CREATE TABLE {table_name} 
-                    as
-                    SELECT * FROM tmp_{table_name};'''
+        print(f'write table {self.name}',end='\t')
+        if self.data or (self.dataframe and self.dataframe.count() != 0 ):
+            spark = self.spark_context
+            table_name = self.name
+            self.build_dataframe()
+            self.dataframe.createOrReplaceTempView(f'tmp_{table_name}')
+            spark.sql(f'DROP TABLE IF EXISTS {table_name};')
+            if self.external_location:
+                cmd = f'''CREATE EXTERNAL TABLE {table_name}
+                        LOCATION '{self.external_location}'
+                        as SELECT * FROM tmp_{table_name};'''
+            else:
+                cmd = f'''CREATE TABLE {table_name} 
+                        as
+                        SELECT * FROM tmp_{table_name};'''
 
-        spark.sql(cmd)
-        spark.sql(f'DROP VIEW IF EXISTS tmp_{table_name};')
+            spark.sql(cmd)
+            spark.sql(f'DROP VIEW IF EXISTS tmp_{table_name};')
+            print('success')
+        else:
+            print('skipped')
 
     def __str__(self) -> str:
         return self.name
@@ -97,8 +103,18 @@ class Table:
 
     def drop(self):
         if self.spark_context:
-            self.spark_context.sql(f'DROP TABLE IF EXISTS {self.name};')
+            cmd = f'DROP TABLE IF EXISTS {self.name};'
+            print(cmd)
+            self.spark_context.sql(cmd).collect()
             self.exist = False
+
+            if self.external_location:
+                if os.path.exists(self.external_location):
+                    print(f'remove {self.external_location}')
+                    shutil.rmtree(self.external_location)
+                else: 
+                    print(f'path "{self.external_location}" not found')
+
 
     @property
     def spark_context(self) -> SparkSession: 
@@ -145,7 +161,7 @@ class Tables_config:
                 self.bronze_extra = table
                 break
 
-    def tables(self) -> list:
+    def tables(self) -> list[Table]:
         for table in self.service:
             yield table
         for table in self.data:
@@ -179,24 +195,39 @@ class Tables_config:
                     schema.add('id_log_experiment',StringType(), True)
                     
                     table.schema = schema
-            
-
 
 
 
 
 @task
-def install(spark_context: SparkSession):
-
-    tables_config = Tables_config(spark_context = spark_context)
+def remove(spark_context: SparkSession, tables_config: Tables_config = None):
+    
+    if not tables_config:
+        tables_config = Tables_config(spark_context = spark_context)
 
     for table in tables_config.tables():
         table.drop()
+
+    spark_context.sql('SHOW TABLES;').show()
+
+
+@task
+def install(spark_context: SparkSession, tables_config: Tables_config = None):
+
+    if not tables_config:
+        tables_config = Tables_config(spark_context = spark_context)
 
     for table in tables_config.service:
         table.create()
 
     spark_context.sql('SHOW TABLES;').show()
 
+@task
+def reinstall(spark_context: SparkSession):
+    tables_config = Tables_config(spark_context = spark_context)
+    remove(spark_context = spark_context, tables_config = tables_config)
+    install(spark_context = spark_context, tables_config = tables_config)
+
+
 if __name__ == "__main__":
-    install()
+    reinstall()

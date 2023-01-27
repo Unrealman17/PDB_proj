@@ -3,10 +3,11 @@
 TODO:
     1 |+| расчет контрольных сумм и их проверка
     2 |-| обработка всех типов из документации
-    3 |0| прикрутить storage аккаунт
+    3 |+| прикрутить storage аккаунт
     4 |+| сделать чтение списка экспериментов из файла
     5 |0| создать отдельный джоб и запустить код на нем
     6 |0| использовать заголовок ETag через HEAD запрос
+    7 |0| добавить размер памяти на датафрейм для сброса данных в таблицу аналогично buffer_size_per_table
 '''
 '''
     1 загрузка, разархивирование файлов
@@ -16,7 +17,7 @@ TODO:
 '''
 import time
 from datetime import datetime
-from install import Tables_config
+from installer import Tables_config
 start_time = time.time()
 start_ts = datetime.now()
 from pyspark.sql import functions as pyspark_f

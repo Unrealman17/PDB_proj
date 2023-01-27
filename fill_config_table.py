@@ -1,4 +1,4 @@
-from install import Table, Tables_config
+from installer import Table, Tables_config
 from pyspark.sql import SparkSession
 from pdb_helper import task
 
