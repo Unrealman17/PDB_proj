@@ -15,7 +15,10 @@ def configure(spark_context: SparkSession):
     # start pipeline
     spark_context.sql("""insert into history_pdb_actualizer(begin,end)
                     select now(), null;""")
-    shutil.rmtree(downloads_path)
+    try:
+        shutil.rmtree(downloads_path)
+    except FileNotFoundError:
+        print(f'{downloads_path} does not exists.')
     Path(downloads_path).mkdir(parents=True)
 
     # experiment_df = spark_context.read.table(
