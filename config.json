@@ -10,7 +10,8 @@
         "_exptl.method"
     ],
     "download_thread": 4,
-    "downloads_path" : "/home/e/proj/pdb_proj/downloads/",
-    "table_path": "/home/e/proj/pdb_proj/external/",
+    "storage_account_mount_point" : "/mnt/testblobstorage",
+    "downloads_path" : "/mnt/testblobstorage/files/",
+    "table_path": "/mnt/testblobstorage/data/",
     "buffer_size_per_table": 8192
 }
