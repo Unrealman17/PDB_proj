@@ -37,19 +37,6 @@ reinstall(spark_context = spark, dbutils=dbutils)
 
 # COMMAND ----------
 
-os.path.exists('/dbfs/mnt/testblobstorage/data/config_pdb_actualizer')
-
-# COMMAND ----------
-
-dbutils.fs.head('dbfs:/mnt/testblobstorage/data/bronze_entity_poly_seq')
-
-# COMMAND ----------
-
-dbutils.fs.ls('dbfs:/mnt/testblobstorage/data/bronze_entity_poly_seq')
-
-
-# COMMAND ----------
-
 fill(spark_context = spark)
 
 # COMMAND ----------
@@ -69,7 +56,3 @@ main(spark_context = spark)
 
 # MAGIC %sql
 # MAGIC SELECT * FROM bronze_entity;
-
-# COMMAND ----------
-
-

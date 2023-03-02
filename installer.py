@@ -139,6 +139,7 @@ class Table:
     def create(self):
         if self.dml:
             if self.spark_context:
+                print(self.dml)
                 self.spark_context.sql(self.dml)
                 self.exist = True
                 return
@@ -274,18 +275,22 @@ def remove(spark_context: SparkSession, tables_config: Tables_config):
 
 @task
 def install(spark_context: SparkSession, tables_config: Tables_config = None):
-
+    
+    downloads_path = tables_config.config['downloads_path']
+    
+    if tables_config.dbutils:
+        tables_config.dbutils.fs.mkdirs(dbr_prepare_path(downloads_path))
+    else:
+        Path(downloads_path).mkdir(parents=True)
+        
     if not tables_config:
-        tables_config = Tables_config(spark_context = spark_context, dbutils=dbutils)
+        tables_config = Tables_config(spark_context = spark_context)   
 
     for table in tables_config.service:
         table.create()
 
     spark_context.sql('SHOW TABLES;').show()
     
-    downloads_path = tables_config.config['downloads_path']
-        
-    Path(downloads_path).mkdir(parents=True)
     
 
 @task
