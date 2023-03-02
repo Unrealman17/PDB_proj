@@ -4,7 +4,6 @@ from pyspark.sql import SparkSession
 import os
 import sys
 from pdb_helper import read_config, task
-from gemmi import cif
 from pyspark.sql.types import StructType, StructField, StringType
 import shutil
 from pathlib import Path
@@ -235,7 +234,7 @@ class Tables_config:
                 yield table
 
     def init_bronze_schema(self, file_name:str = None, block = None):
-
+        from gemmi import cif
         if file_name:
             block = cif.read_file(file_name).sole_block()  # mmCIF has exactly one block
         
