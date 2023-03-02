@@ -14,18 +14,23 @@ from pathlib import Path
 
 config = read_config()
 
-def path_exists(path, dbutils):
-    if dbutils:
-        try:
-            dbutils.fs.ls(path)
-            return True
-        except Exception as e:
-            if 'java.io.FileNotFoundException' in str(e):
-                return False
-            else:
-                raise    
-    else:
-        return os.path.exists(path)
+def dbr_path_exists(path, dbutils):
+    try:
+        dbutils.fs.ls(path)
+        return True
+    except Exception as e:
+        if 'java.io.FileNotFoundException' in str(e):
+            return False
+        else:
+            raise    
+
+def dbr_prepare_path(path: str):
+    case1 = '/dbfs/'
+    if path.startswith(case1):
+        path = 'dbfs:' + path[len(case1)-1:]
+    elif path.startswith('/') and not path.startswith('/dbfs/'):
+        path = 'dbfs:' + path
+    return path
 
 
 def delete_mounted_dir(dirname, dbutils):
@@ -36,19 +41,22 @@ def delete_mounted_dir(dirname, dbutils):
         dbutils.fs.rm(f.path, recurse=True)
     dbutils.fs.rm(dirname, recurse=True)
 
+    
 def rmdir(path, dbutils = None):
-    if path_exists(path, dbutils = dbutils):
-        print(f'removing {path} . . .', end ='\t')
-        if dbutils:
-            crutch = 'dbfs:'+self.external_location
-            delete_mounted_dir(dirname = crutch, dbutils = dbutils)
-        else:
-            shutil.rmtree(path)
+    if dbutils:
+        path = dbr_prepare_path(path)
+        check = dbr_path_exists(path, dbutils)
+        delete_funct = lambda arg: delete_mounted_dir(dirname = arg, dbutils = dbutils)
+    else:
+        check = os.path.exists(path)
+        delete_funct = shutil.rmtree
+        
+    if check:
+        print(f'removing "{path}" . . .', end ='\t')
+        delete_funct(path)
         print('success')
     else:
         print(f'path "{path}" not found')
-
-
 
 
 class Table:
@@ -241,14 +249,7 @@ class Tables_config:
 
 
 
-def prepare_path(path, databricks:bool = False):
-    if databricks:
-        case1 = '/dbfs/'
-        if path.startwith(case1):
-            path = 'dbfs:' + path[len(case1):]
-        elif path.startwith('/') and not path.startwith('/dbfs/'):
-            path = 'dbfs:' + path
-    return path
+
 
 
 @task
@@ -262,10 +263,10 @@ def remove(spark_context: SparkSession, tables_config: Tables_config):
 
     spark_context.sql('SHOW TABLES;').show()
     
-    downloads_path = prepare_path(tables_config.config['downloads_path'], databricks = tables_config.dbutils)
+    downloads_path = tables_config.config['downloads_path']
     rmdir(downloads_path, dbutils = tables_config.dbutils)
     
-    table_path = prepare_path(tables_config.config['table_path'], databricks = tables_config.dbutils)
+    table_path = tables_config.config['table_path']
     rmdir(table_path, dbutils = tables_config.dbutils)
     
     
@@ -286,6 +287,7 @@ def install(spark_context: SparkSession, tables_config: Tables_config = None):
         
     Path(downloads_path).mkdir(parents=True)
     
+
 @task
 def reinstall(spark_context: SparkSession, dbutils=None):
     tables_config = Tables_config(spark_context = spark_context, dbutils=dbutils)
