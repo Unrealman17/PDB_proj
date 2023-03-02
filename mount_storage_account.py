@@ -1,7 +1,7 @@
 from pdb_helper import read_config
 
 
-def mount_storage_account():
+def mount_storage_account(dbutils):
     storage_account_mount_point = read_config()["storage_account_mount_point"]
 
     if storage_account_mount_point not in [m.mountPoint for m in dbutils.fs.mounts()]:

@@ -7,11 +7,47 @@ from pdb_helper import read_config, task
 from gemmi import cif
 from pyspark.sql.types import StructType, StructField, StringType
 import shutil
+from pathlib import Path
 
 # dbx execute --cluster-id=1108-081632-vxq32gz9 install --no-package
 # dbx sync dbfs --source .
 
 config = read_config()
+
+def path_exists(path, dbutils):
+    if dbutils:
+        try:
+            dbutils.fs.ls(path)
+            return True
+        except Exception as e:
+            if 'java.io.FileNotFoundException' in str(e):
+                return False
+            else:
+                raise    
+    else:
+        return os.path.exists(path)
+
+
+def delete_mounted_dir(dirname, dbutils):
+    files=dbutils.fs.ls(dirname)
+    for f in files:
+        if f.isDir():
+            delete_mounted_dir(f.path, dbutils)
+        dbutils.fs.rm(f.path, recurse=True)
+    dbutils.fs.rm(dirname, recurse=True)
+
+def rmdir(path, dbutils = None):
+    if path_exists(path, dbutils = dbutils):
+        print(f'removing {path} . . .', end ='\t')
+        if dbutils:
+            crutch = 'dbfs:'+self.external_location
+            delete_mounted_dir(dirname = crutch, dbutils = dbutils)
+        else:
+            shutil.rmtree(path)
+        print('success')
+    else:
+        print(f'path "{path}" not found')
+
 
 
 
@@ -25,7 +61,7 @@ class Table:
                     exist: bool = None, 
                     spark_context: SparkSession = None,
                     external_location = None,
-                    category: str = None
+                    category: str = None,
     ) -> None:
         self.name = name
         self.external_location = external_location + self.name
@@ -101,19 +137,25 @@ class Table:
             raise Exception('spark is not initialized')
         raise Exception('DML is empty')
 
-    def drop(self):
+    def drop(self):        
         if self.spark_context:
             cmd = f'DROP TABLE IF EXISTS {self.name};'
             print(cmd)
             self.spark_context.sql(cmd).collect()
             self.exist = False
 
-            if self.external_location:
-                if os.path.exists(self.external_location):
-                    print(f'remove {self.external_location}')
-                    shutil.rmtree(self.external_location)
-                else: 
-                    print(f'path "{self.external_location}" not found')
+            #if self.external_location:     
+            #    if os.path.exists(self.external_location):
+            #        print(f'remove {self.external_location}')
+            #        shutil.rmtree(self.external_location)
+            #    else: 
+            #        # for databicks
+            #        crutch = 'dbfs:'+self.external_location
+            #        if path_exists(crutch, dbutils = self.dbutils):
+            #            print(f'remove {crutch}')
+            #            delete_mounted_dir(dirname = crutch, dbutils = self.dbutils)
+            #        else:
+            #            print(f'path "{self.external_location}" not found')
 
 
     @property
@@ -128,11 +170,12 @@ class Table:
 
 class Tables_config:
     # reads "tables" folder and "config.json"
-    def __init__(self, tables_path='tables', spark_context: SparkSession = None,) -> None:
+    def __init__(self, tables_path='tables', spark_context: SparkSession = None, dbutils = None) -> None:
         
         config = read_config()
-
+        self.config = config
         self.service = []
+        self.dbutils = dbutils
         for file_name in os.listdir(tables_path):
             file_path = os.path.join(tables_path, file_name)
             if os.path.isfile(file_path):
@@ -198,9 +241,11 @@ class Tables_config:
 
 
 
-
+def prepare_path(path):
+    if path.startwith('/dbfs/'):
+                    
 @task
-def remove(spark_context: SparkSession, tables_config: Tables_config = None):
+def remove(spark_context: SparkSession, tables_config: Tables_config):
     
     if not tables_config:
         tables_config = Tables_config(spark_context = spark_context)
@@ -209,22 +254,34 @@ def remove(spark_context: SparkSession, tables_config: Tables_config = None):
         table.drop()
 
     spark_context.sql('SHOW TABLES;').show()
+    
+    downloads_path = tables_config.config['downloads_path']
+    rmdir(downloads_path, dbutils = tables_config.dbutils)
+    
+    table_path = crutch = 'dbfs:'+tables_config.config['table_path']
+    rmdir(table_path, dbutils = tables_config.dbutils)
+    
+    
 
 
 @task
 def install(spark_context: SparkSession, tables_config: Tables_config = None):
 
     if not tables_config:
-        tables_config = Tables_config(spark_context = spark_context)
+        tables_config = Tables_config(spark_context = spark_context, dbutils=dbutils)
 
     for table in tables_config.service:
         table.create()
 
     spark_context.sql('SHOW TABLES;').show()
-
+    
+    downloads_path = tables_config.config['downloads_path']
+        
+    Path(downloads_path).mkdir(parents=True)
+    
 @task
-def reinstall(spark_context: SparkSession):
-    tables_config = Tables_config(spark_context = spark_context)
+def reinstall(spark_context: SparkSession, dbutils=None):
+    tables_config = Tables_config(spark_context = spark_context, dbutils=dbutils)
     remove(spark_context = spark_context, tables_config = tables_config)
     install(spark_context = spark_context, tables_config = tables_config)
 

@@ -11,7 +11,7 @@
     ],
     "download_thread": 4,
     "storage_account_mount_point" : "/mnt/testblobstorage",
-    "downloads_path" : "/mnt/testblobstorage/files/",
+    "downloads_path" : "/dbfs/mnt/testblobstorage/files/",
     "table_path": "/mnt/testblobstorage/data/",
     "buffer_size_per_table": 8192
 }
