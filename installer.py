@@ -241,9 +241,16 @@ class Tables_config:
 
 
 
-def prepare_path(path):
-    if path.startwith('/dbfs/'):
-                    
+def prepare_path(path, databricks:bool = False):
+    if databricks:
+        case1 = '/dbfs/'
+        if path.startwith(case1):
+            path = 'dbfs:' + path[len(case1):]
+        elif path.startwith('/') and not path.startwith('/dbfs/'):
+            path = 'dbfs:' + path
+    return path
+
+
 @task
 def remove(spark_context: SparkSession, tables_config: Tables_config):
     
@@ -255,10 +262,10 @@ def remove(spark_context: SparkSession, tables_config: Tables_config):
 
     spark_context.sql('SHOW TABLES;').show()
     
-    downloads_path = tables_config.config['downloads_path']
+    downloads_path = prepare_path(tables_config.config['downloads_path'], databricks = tables_config.dbutils)
     rmdir(downloads_path, dbutils = tables_config.dbutils)
     
-    table_path = crutch = 'dbfs:'+tables_config.config['table_path']
+    table_path = prepare_path(tables_config.config['table_path'], databricks = tables_config.dbutils)
     rmdir(table_path, dbutils = tables_config.dbutils)
     
     
