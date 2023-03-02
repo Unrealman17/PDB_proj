@@ -9,9 +9,14 @@ from pyspark.sql import SparkSession
 
 @task
 def configure(spark_context: SparkSession):
+    '''
+        Configure separate downloading on threads.
+        Results in config_pdb_actualizer.
+        Mark pipeline as started.
+    '''
     config = read_config()
     thread_num = config["download_thread"]
-    downloads_path = config["downloads_path"]
+    # downloads_path = config["downloads_path"]
     # start pipeline
     spark_context.sql("""insert into history_pdb_actualizer(begin,end)
                     select now(), null;""")

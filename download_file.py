@@ -11,6 +11,10 @@ from pdb_helper import task, read_config
 
 @task
 def download_unzip(thread, spark_context: SparkSession,) -> str:
+    '''
+        download and unzip files
+        Returns: list of file names
+    '''
     downloads_path = read_config()['downloads_path']
     experiments = spark_context.sql(f"select experiment from config_pdb_actualizer where thread = {thread};").collect()
     res = []

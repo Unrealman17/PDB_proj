@@ -5,6 +5,9 @@ from pdb_helper import task
 
 @task
 def fill(spark_context: SparkSession, input_path='input.txt'):
+    '''
+        read data from input.txt and insert into table config_pdb_actualizer
+    '''
     config_pdb_actualizer = Tables_config(spark_context=spark_context).config_table
     with open(input_path)as f:
         txt = f.read()

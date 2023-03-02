@@ -175,6 +175,10 @@ class Table:
         self._spark_context = spark
         self.exist = None
 
+class STable(Table):
+    pass
+
+
 
 class Tables_config:
     # reads "tables" folder and "config.json"
@@ -184,6 +188,7 @@ class Tables_config:
         self.config = config
         self.service = []
         self.dbutils = dbutils
+        tables_path = os.path.join(tables_path,'service')
         for file_name in os.listdir(tables_path):
             file_path = os.path.join(tables_path, file_name)
             if os.path.isfile(file_path):
