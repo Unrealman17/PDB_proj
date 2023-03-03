@@ -1,9 +1,27 @@
-# Databricks notebook source
-from installer import rmdir
-rmdir("dbfs:/mnt/testblobstorage/data/silver_chem_comp", dbutils)
-#dbutils.fs.rm("dbfs:/mnt/testblobstorage/data/silver_chem_comp", True)
+from pdb_helper import read_config, task
+from pyspark.sql import SparkSession
+import hashlib
+from gemmi import cif
+import time
+from datetime import datetime
+from installer import Tables_config
+start_time = time.time()
+start_ts = datetime.now()
 
-# COMMAND ----------
+
+@task
+def silver(spark_context: SparkSession):    
+    tables_config = Tables_config(spark_context=spark_context)
+
+    for table in tables_config.silver_tables():
+        table.create_or_replace()
+        table.head()
+
+
+
+if __name__ == "__main__":
+    silver()
+
 
 # MAGIC %sql
 # MAGIC -- _chem_comp

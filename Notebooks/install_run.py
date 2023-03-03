@@ -17,7 +17,7 @@ from installer import reinstall
 from fill_config_table import fill
 from configure import configure
 from download_file import download_unzip
-from main import main
+from bronze import bronze
 from mount_storage_account import mount_storage_account
 
 # COMMAND ----------
@@ -50,7 +50,7 @@ for i in range(download_thread):
 
 # COMMAND ----------
 
-main(spark_context = spark)
+bronze(spark_context = spark)
 
 # COMMAND ----------
 

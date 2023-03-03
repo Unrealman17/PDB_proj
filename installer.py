@@ -12,7 +12,7 @@ import sqlparse
 # dbx execute --cluster-id=1108-081632-vxq32gz9 install --no-package
 # dbx sync dbfs --source .
 
-config = read_config()
+CONFIG = read_config()
 
 def dbr_path_exists(path, dbutils):
     try:
@@ -38,7 +38,7 @@ def find_selected_columns(query:str) -> list[str]:
         if found_select:
             if isinstance(token, sqlparse.sql.IdentifierList):
                 return [
-                    col.value.split(" ")[-1].strip("`").rpartition('.')[-1]
+                    col.value.split("--")[0].strip().split(" ")[-1].strip("`").rpartition('.')[-1]
                     for col in token.tokens
                     if isinstance(col, sqlparse.sql.Identifier)
                 ]
@@ -112,6 +112,9 @@ class Table:
 
     def __repr__(self) -> str:
         return str(self)
+
+    def head(self, n=5):
+        self.spark_context.sql(f'SELECT * FROM {self.name} LIMIT {n}').show()
 
     def drop(self):        
         if self.spark_context:
@@ -193,13 +196,33 @@ class DTable(Table):
                         external_location=external_location
                     )
         self.category = category
+        self.columns = []
+    
+    def create_table_as(self)->str:
+        cmd = f'CREATE '
+        if self.external_location:
+            cmd += 'EXTERNAL '
+        cmd += f'TABLE {self.name}\n'
+        cmd += f'USING {self.format}\n'
+        if self.external_location:
+            cmd += f"LOCATION '{self.external_location}'\n"
+        cmd += f'AS\n'
+        return cmd
 
+    def insert_overwrite(self)->str:
+        if not self.columns:
+            raise ValueError('self.columns is empty')
+        cmd = f'INSERT OVERWRITE {self.name}('
+        cmd += ('\n'+(' '*20))
+        cmd += (',\n'+(' '*20)).join(self.columns)
+        cmd += ')\n' 
+        return cmd
 
 class BTable(DTable):
     """
         Bronze Table
     """
-    buffer_size_per_table = config["buffer_size_per_table"]
+    buffer_size_per_table = CONFIG["buffer_size_per_table"]
 
     def __init__(self, 
                     name:str, 
@@ -213,9 +236,19 @@ class BTable(DTable):
                         external_location=external_location,
                         category=category,
                         )
-        self.schema = None
+        self._schema = None
         self.data = []
         self.dataframe = None
+
+    @property
+    def schema(self): 
+        return self._schema
+
+    @schema.setter
+    def schema(self, schema):
+        self._schema = schema
+        self.columns = [ f"`{x}`" for x in schema.names]
+        
 
     def build_dataframe(self):
         if not self.dataframe:
@@ -232,16 +265,13 @@ class BTable(DTable):
             table_name = self.name
             self.build_dataframe()
             self.dataframe.createOrReplaceTempView(f'tmp_{table_name}')
-            spark.sql(f'DROP TABLE IF EXISTS {table_name};')
-            if self.external_location:
-                cmd = f'''CREATE EXTERNAL TABLE {table_name}
-                        LOCATION '{self.external_location}'
-                        as SELECT * FROM tmp_{table_name};'''
+            if self.exist:
+                cmd = self.insert_overwrite()
             else:
-                cmd = f'''CREATE TABLE {table_name} 
-                        as
-                        SELECT * FROM tmp_{table_name};'''
+                cmd = self.create_table_as()
 
+            cmd += f'SELECT * FROM tmp_{table_name};'
+            print(cmd)
             spark.sql(cmd)
             spark.sql(f'DROP VIEW IF EXISTS tmp_{table_name};')
             print('success')
@@ -265,6 +295,7 @@ class STable(DTable):
                     query:str,
                     external_location = None,
     ) -> None:
+        #TODO: replace arg, kwarg
         DTable.__init__(self,
                         name=name,
                         spark_context=spark_context,
@@ -277,34 +308,19 @@ class STable(DTable):
     def create_or_replace(self):
         spark = self.spark_context
         if self.exist:
-            cmd = f'insert overwrite {self.name}('
-            cmd += ('\n'+(' '*20))
-            cmd += (',\n'+(' '*20)).join(self.columns)
-            cmd += ')\n' 
+            cmd = self.insert_overwrite()
         else:
-            cmd = f'CREATE '
-            if self.external_location:
-                cmd += 'EXTERNAL '
-            cmd += f'TABLE {self.name}\n'
-            cmd += f'USING {self.format}\n'
-            if self.external_location:
-                cmd += f"LOCATION '{self.external_location}'\n"
-            cmd += f'AS\n'
+            cmd = self.create_table_as()
         cmd += self.query
         print(cmd)
         spark.sql(cmd)
-
-
-    
 
 
 
 class Tables_config:
     # reads "tables" folder and "config.json"
     def __init__(self, tables_path='tables', spark_context: SparkSession = None, dbutils = None) -> None:
-        
-        config = read_config()
-        self.config = config
+        self.config = CONFIG
         self.service = []
         self.dbutils = dbutils
         service_path = os.path.join(tables_path,'service')
@@ -316,7 +332,7 @@ class Tables_config:
                         dml = f.read()
                     table = ServiceTable(name=file_name[:-len('.sql')], 
                                         dml=dml, 
-                                        external_location=config['table_path'], 
+                                        external_location=self.config['table_path'], 
                                         spark_context=spark_context
                                     )
                     self.service.append(table)
@@ -332,15 +348,16 @@ class Tables_config:
                                 name=f'bronze_{t}', 
                                 spark_context=spark_context, 
                                 category='_'+t, 
-                                external_location=config['table_path']
+                                external_location=self.config['table_path']
                             )
-                        for t in config["tables"]]
+                        for t in self.config["tables"]]
 
         for table in self.bronze:
             if table.name == 'bronze_extra':
-                table.schema = StructType([StructField(fld, StringType(), True) 
-                            for fld in config['extra']])
-                table.schema.add('experiment',StringType(), True)
+                schema = StructType([StructField(fld, StringType(), True) 
+                            for fld in self.config['extra']])
+                schema.add('experiment',StringType(), True)
+                table.schema = schema
                 self.bronze_extra = table
                 break
 
@@ -355,22 +372,22 @@ class Tables_config:
                     category = file_name[:-len('.sql')]
                     table = STable(name='silver_'+category, 
                                         query=query, 
-                                        external_location=config['table_path'], 
+                                        external_location=self.config['table_path'], 
                                         category='_'+category,
                                         spark_context=spark_context
                                     )
                     self.silver.append(table)
 
     
-    def bronze_tables(self) -> list[Table]:
+    def bronze_tables(self) -> list[BTable]:
         for table in self.bronze:
             yield table
 
-    def silver_tables(self) -> list[Table]:
+    def silver_tables(self) -> list[STable]:
         for table in self.silver:
             yield table
 
-    def data(self):
+    def data(self)-> list[DTable]:
         for table in self.bronze_tables():
             yield table
         for table in self.silver_tables():
@@ -382,7 +399,7 @@ class Tables_config:
         for table in self.data():
             yield table
     
-    def bronze_category_tables(self) -> list[Table]:
+    def bronze_category_tables(self) -> list[BTable]:
         for table in self.bronze_tables():
             if self.bronze_extra.name != table.name:
                 yield table
@@ -402,28 +419,23 @@ class Tables_config:
                     table.schema = schema
 
 
-
-
-
-
 @task
-def remove(spark_context: SparkSession, tables_config: Tables_config):
+def remove(spark_context: SparkSession, dbutils = None):
     
-    if not tables_config:
-        tables_config = Tables_config(spark_context = spark_context)
+    downloads_path = CONFIG['downloads_path']
+    rmdir(downloads_path, dbutils = dbutils)
+    
+    table_path = CONFIG['table_path']
+    rmdir(table_path, dbutils = dbutils)
+
+    tables_config = Tables_config(spark_context = spark_context, dbutils=dbutils)
 
     for table in tables_config.tables():
         table.drop()
 
-    spark_context.sql('SHOW TABLES;').show()
+    spark_context.sql('SHOW TABLES;').show()   
     
-    downloads_path = tables_config.config['downloads_path']
-    rmdir(downloads_path, dbutils = tables_config.dbutils)
-    
-    table_path = tables_config.config['table_path']
-    rmdir(table_path, dbutils = tables_config.dbutils)
-    
-    
+    return tables_config
 
 
 @task
@@ -448,9 +460,8 @@ def install(spark_context: SparkSession, tables_config: Tables_config = None):
 
 @task
 def reinstall(spark_context: SparkSession, dbutils=None):
-    tables_config = Tables_config(spark_context = spark_context, dbutils=dbutils)
-    remove(spark_context = spark_context, tables_config = tables_config)
-    install(spark_context = spark_context, tables_config = tables_config)
+    tables_config = remove(spark_context = spark_context, dbutils=dbutils)
+    install(spark_context=spark_context, tables_config=tables_config)
 
 
 if __name__ == "__main__":

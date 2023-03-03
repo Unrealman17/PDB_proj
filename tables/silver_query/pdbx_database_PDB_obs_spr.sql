@@ -1,6 +1,6 @@
 SELECT  ex.experiment, 
         m.id,
-        cast(m.date as date) date,
+        cast(m.date as date) as date,
         m.pdb_id,
         m.replace_pdb_id,
         m.details

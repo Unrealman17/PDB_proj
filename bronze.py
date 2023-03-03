@@ -32,7 +32,7 @@ def calculate_checksum(file_path):
 
 
 @task
-def main(spark_context: SparkSession):
+def bronze(spark_context: SparkSession):
     config = read_config()
     downloads_path = config["downloads_path"]
     '''
@@ -176,4 +176,4 @@ def main(spark_context: SparkSession):
 
 
 if __name__ == "__main__":
-    main()
+    bronze()
