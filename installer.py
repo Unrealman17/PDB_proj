@@ -7,6 +7,7 @@ from pdb_helper import read_config, task
 from pyspark.sql.types import StructType, StructField, StringType
 import shutil
 from pathlib import Path
+import sqlparse
 
 # dbx execute --cluster-id=1108-081632-vxq32gz9 install --no-package
 # dbx sync dbfs --source .
@@ -22,6 +23,29 @@ def dbr_path_exists(path, dbutils):
             return False
         else:
             raise    
+
+def path_exists(path, dbutils=None):
+    if dbutils:
+        path = dbr_prepare_path(path)
+        return dbr_path_exists(path, dbutils)
+    else:
+        return os.path.exists(path)
+
+def find_selected_columns(query:str) -> list[str]:
+    tokens = sqlparse.parse(query)[0].tokens
+    found_select = False
+    for token in tokens:
+        if found_select:
+            if isinstance(token, sqlparse.sql.IdentifierList):
+                return [
+                    col.value.split(" ")[-1].strip("`").rpartition('.')[-1]
+                    for col in token.tokens
+                    if isinstance(col, sqlparse.sql.Identifier)
+                ]
+        else:
+            found_select = token.match(sqlparse.tokens.Keyword.DML, ["select", "SELECT"])
+    raise Exception("Could not find a select statement. Weired query :)")
+
 
 def dbr_prepare_path(path: str):
     case1 = '/dbfs/'
@@ -42,12 +66,11 @@ def delete_mounted_dir(dirname, dbutils):
 
     
 def rmdir(path, dbutils = None):
+    check = path_exists(path, dbutils)
     if dbutils:
         path = dbr_prepare_path(path)
-        check = dbr_path_exists(path, dbutils)
         delete_funct = lambda arg: delete_mounted_dir(dirname = arg, dbutils = dbutils)
     else:
-        check = os.path.exists(path)
         delete_funct = shutil.rmtree
         
     if check:
@@ -60,18 +83,75 @@ def rmdir(path, dbutils = None):
 
 class Table:
 
-    buffer_size_per_table = config["buffer_size_per_table"]
-
     def __init__(self, 
                     name:str, 
-                    dml: str = None, 
-                    exist: bool = None, 
-                    spark_context: SparkSession = None,
+                    spark_context: SparkSession,
                     external_location = None,
-                    category: str = None,
+                    format = 'delta',
     ) -> None:
         self.name = name
         self.external_location = external_location + self.name
+        self._spark_context = spark_context
+        self.format = format
+        table_exist = spark_context._jsparkSession.catalog().tableExists('default', name)
+        
+        self.exist = table_exist
+        if self.external_location and not table_exist:
+            p_exist = path_exists(self.external_location)
+            if p_exist:
+                cmd = f"create EXTERNAL table {self.name}\n"\
+                        +f"LOCATION '{self.external_location}';"
+                print(cmd)
+                spark_context.sql(cmd)
+                self.exist = True
+            else: # not p_exist
+                self.exist = False
+
+    def __str__(self) -> str:
+        return self.name
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def drop(self):        
+        if self.spark_context:
+            cmd = f'DROP TABLE IF EXISTS {self.name};'
+            print(cmd)
+            self.spark_context.sql(cmd).collect()
+            self.exist = False
+
+    @property
+    def spark_context(self) -> SparkSession: 
+        return self._spark_context
+
+    @spark_context.setter
+    def spark_context(self, spark: SparkSession):
+        self._spark_context = spark
+        self.exist = None
+
+'''
+             Table
+           //     \\
+ServiceTable       DTable
+                  //     \\   
+               BTable    STable
+'''
+
+class ServiceTable(Table):
+    """
+        Service Table
+    """
+    def __init__(self, 
+                    name:str, 
+                    spark_context: SparkSession,
+                    dml: str, 
+                    external_location = None,
+    ) -> None:
+        Table.__init__(self,
+                        name=name,
+                        spark_context=spark_context,
+                        external_location=external_location
+                    )
         if self.external_location and dml:
             create_table = 'create table '
             lower = dml.lower()
@@ -86,17 +166,56 @@ class Table:
                         + f" LOCATION '{self.external_location}';"
 
         self.dml = dml
-        self.exist = exist
-        self._spark_context = spark_context
-        self.schema = None
+    
+    def create(self):
+        if self.dml:
+            if self.spark_context:
+                print(self.dml)
+                self.spark_context.sql(self.dml)
+                self.exist = True
+                return
+            raise Exception('spark is not initialized')
+        raise Exception('DML is empty')
+
+class DTable(Table):
+    """
+        Data Table
+    """
+    def __init__(self, 
+                    name:str, 
+                    spark_context: SparkSession,
+                    category: str,
+                    external_location = None,
+    ) -> None:
+        Table.__init__(self,
+                        name=name,
+                        spark_context=spark_context,
+                        external_location=external_location
+                    )
         self.category = category
+
+
+class BTable(DTable):
+    """
+        Bronze Table
+    """
+    buffer_size_per_table = config["buffer_size_per_table"]
+
+    def __init__(self, 
+                    name:str, 
+                    spark_context: SparkSession,
+                    category: str,
+                    external_location = None,
+    ) -> None:
+        DTable.__init__(self,
+                        name=name,
+                        spark_context=spark_context,
+                        external_location=external_location,
+                        category=category,
+                        )
+        self.schema = None
         self.data = []
         self.dataframe = None
-
-    def append(self, row: list):
-        self.data.append(row)
-        if Table.buffer_size_per_table < sys.getsizeof(self.data):
-            self.build_dataframe()
 
     def build_dataframe(self):
         if not self.dataframe:
@@ -129,54 +248,54 @@ class Table:
         else:
             print('skipped')
 
-    def __str__(self) -> str:
-        return self.name
-
-    def __repr__(self) -> str:
-        return str(self)
-
-    def create(self):
-        if self.dml:
-            if self.spark_context:
-                print(self.dml)
-                self.spark_context.sql(self.dml)
-                self.exist = True
-                return
-            raise Exception('spark is not initialized')
-        raise Exception('DML is empty')
-
-    def drop(self):        
-        if self.spark_context:
-            cmd = f'DROP TABLE IF EXISTS {self.name};'
-            print(cmd)
-            self.spark_context.sql(cmd).collect()
-            self.exist = False
-
-            #if self.external_location:     
-            #    if os.path.exists(self.external_location):
-            #        print(f'remove {self.external_location}')
-            #        shutil.rmtree(self.external_location)
-            #    else: 
-            #        # for databicks
-            #        crutch = 'dbfs:'+self.external_location
-            #        if path_exists(crutch, dbutils = self.dbutils):
-            #            print(f'remove {crutch}')
-            #            delete_mounted_dir(dirname = crutch, dbutils = self.dbutils)
-            #        else:
-            #            print(f'path "{self.external_location}" not found')
+    def append(self, row: list):
+        self.data.append(row)
+        if BTable.buffer_size_per_table < sys.getsizeof(self.data):
+            self.build_dataframe()
 
 
-    @property
-    def spark_context(self) -> SparkSession: 
-        return self._spark_context
+class STable(DTable):
+    """
+        Silver Table
+    """
+    def __init__(self, 
+                    name:str, 
+                    spark_context: SparkSession ,
+                    category: str,
+                    query:str,
+                    external_location = None,
+    ) -> None:
+        DTable.__init__(self,
+                        name=name,
+                        spark_context=spark_context,
+                        external_location=external_location,
+                        category=category,
+                        )
+        self.query = query
+        self.columns = find_selected_columns(query)
 
-    @spark_context.setter
-    def spark_context(self, spark: SparkSession):
-        self._spark_context = spark
-        self.exist = None
+    def create_or_replace(self):
+        spark = self.spark_context
+        if self.exist:
+            cmd = f'insert overwrite {self.name}('
+            cmd += ('\n'+(' '*20))
+            cmd += (',\n'+(' '*20)).join(self.columns)
+            cmd += ')\n' 
+        else:
+            cmd = f'CREATE '
+            if self.external_location:
+                cmd += 'EXTERNAL '
+            cmd += f'TABLE {self.name}\n'
+            cmd += f'USING {self.format}\n'
+            if self.external_location:
+                cmd += f"LOCATION '{self.external_location}'\n"
+            cmd += f'AS\n'
+        cmd += self.query
+        print(cmd)
+        spark.sql(cmd)
 
-class STable(Table):
-    pass
+
+    
 
 
 
@@ -188,14 +307,18 @@ class Tables_config:
         self.config = config
         self.service = []
         self.dbutils = dbutils
-        tables_path = os.path.join(tables_path,'service')
-        for file_name in os.listdir(tables_path):
-            file_path = os.path.join(tables_path, file_name)
+        service_path = os.path.join(tables_path,'service')
+        for file_name in os.listdir(service_path):
+            file_path = os.path.join(service_path, file_name)
             if os.path.isfile(file_path):
                 if file_name.endswith('.sql'):
                     with open(file_path) as f:
                         dml = f.read()
-                    table = Table(file_name[:-len('.sql')], dml=dml, external_location=config['table_path'], spark_context=spark_context)
+                    table = ServiceTable(name=file_name[:-len('.sql')], 
+                                        dml=dml, 
+                                        external_location=config['table_path'], 
+                                        spark_context=spark_context
+                                    )
                     self.service.append(table)
 
                     if table.name.startswith('config'):
@@ -204,12 +327,16 @@ class Tables_config:
                         self.history_table = table
                     elif table.name.startswith('register'):
                         self.register_table = table
+        
+        self.bronze = [BTable(
+                                name=f'bronze_{t}', 
+                                spark_context=spark_context, 
+                                category='_'+t, 
+                                external_location=config['table_path']
+                            )
+                        for t in config["tables"]]
 
-        self.data = [Table(f'{l}_{t}', spark_context=spark_context, category='_'+t, external_location=config['table_path'])
-                     for l in ["bronze", "silver"]
-                     for t in config["tables"]]
-
-        for table in self.data:
+        for table in self.bronze:
             if table.name == 'bronze_extra':
                 table.schema = StructType([StructField(fld, StringType(), True) 
                             for fld in config['extra']])
@@ -217,25 +344,47 @@ class Tables_config:
                 self.bronze_extra = table
                 break
 
+        self.silver = []
+        silver_path = os.path.join(tables_path,'silver_query')
+        for file_name in os.listdir(silver_path):
+            file_path = os.path.join(silver_path, file_name)
+            if os.path.isfile(file_path):
+                if file_name.endswith('.sql'):
+                    with open(file_path) as f:
+                        query = f.read()
+                    category = file_name[:-len('.sql')]
+                    table = STable(name='silver_'+category, 
+                                        query=query, 
+                                        external_location=config['table_path'], 
+                                        category='_'+category,
+                                        spark_context=spark_context
+                                    )
+                    self.silver.append(table)
+
+    
+    def bronze_tables(self) -> list[Table]:
+        for table in self.bronze:
+            yield table
+
+    def silver_tables(self) -> list[Table]:
+        for table in self.silver:
+            yield table
+
+    def data(self):
+        for table in self.bronze_tables():
+            yield table
+        for table in self.silver_tables():
+            yield table
+
     def tables(self) -> list[Table]:
         for table in self.service:
             yield table
-        for table in self.data:
+        for table in self.data():
             yield table
     
     def bronze_category_tables(self) -> list[Table]:
         for table in self.bronze_tables():
             if self.bronze_extra.name != table.name:
-                yield table
-
-    def bronze_tables(self) -> list[Table]:
-        for table in self.data:
-            if table.name.startswith("bronze"):
-                yield table
-
-    def silver_tables(self) -> list[Table]:
-        for table in self.data:
-            if table.name.startswith("silver"):
                 yield table
 
     def init_bronze_schema(self, file_name:str = None, block = None):
