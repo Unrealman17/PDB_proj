@@ -4,12 +4,13 @@ from pdb_helper import task
 
 
 @task
-def fill(spark_context: SparkSession, input_path='input.txt'):
+def fill(spark_context: SparkSession, config: dict):
     '''
         read data from input.txt and insert into table config_pdb_actualizer
     '''
-    config_pdb_actualizer = Tables_config(spark_context=spark_context).config_table
-    with open(input_path)as f:
+    config_pdb_actualizer = Tables_config(
+        spark_context=spark_context, config=config).config_table
+    with open(config["input_file"])as f:
         txt = f.read()
     cmd = f"""
         insert overwrite {config_pdb_actualizer.name}(experiment,thread) values\n('""" \
@@ -19,7 +20,6 @@ def fill(spark_context: SparkSession, input_path='input.txt'):
     #spark.sql("truncate table config_pdb_actualizer force;")
     # config_pdb_actualizer.drop()
     # config_pdb_actualizer.create()
-
 
     inserted = spark_context.sql(cmd).collect()
     inserted = spark_context.sql(

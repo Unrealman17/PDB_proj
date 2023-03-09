@@ -10,7 +10,7 @@ from pdb_helper import task, read_config
 
 
 @task
-def download_unzip(thread, spark_context: SparkSession,) -> str:
+def download_unzip(thread, spark_context: SparkSession, config:dict) -> str:
     '''
         download and unzip files
         Returns: list of file names
@@ -20,7 +20,7 @@ def download_unzip(thread, spark_context: SparkSession,) -> str:
     res = []
     for e in experiments:
         experiment = e.experiment
-        url = f'https://files.wwpdb.org/pub/pdb/data/structures/all/mmCIF/{experiment.lower()}.cif.gz'
+        url = f'{config["download_url"]}{experiment.lower()}.cif.gz'
         gz_file_name = f"{downloads_path}{experiment}.cif.gz"
         file_name = gz_file_name[:-len('.gz')]
         urllib.request.urlretrieve(url, gz_file_name)

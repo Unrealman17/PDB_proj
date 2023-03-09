@@ -8,13 +8,12 @@ from pyspark.sql.types import IntegerType
 from pyspark.sql import SparkSession
 
 @task
-def configure(spark_context: SparkSession):
+def configure(spark_context: SparkSession, config:dict):
     '''
         Configure separate downloading on threads.
         Results in config_pdb_actualizer.
         Mark pipeline as started.
     '''
-    config = read_config()
     thread_num = config["download_thread"]
     # downloads_path = config["downloads_path"]
     # start pipeline

@@ -4,19 +4,19 @@ import hashlib
 from gemmi import cif
 import time
 from datetime import datetime
-from installer import Tables_config
+from installer import Tables_config, CONFIG
 start_time = time.time()
 start_ts = datetime.now()
 
 
 @task
-def silver(spark_context: SparkSession):    
-    tables_config = Tables_config(spark_context=spark_context)
+def silver(spark_context: SparkSession, config: dict):
+    tables_config = Tables_config(
+        spark_context=spark_context, config=config)
 
     for table in tables_config.silver_tables():
         table.create_or_replace()
         table.head()
-
 
 
 if __name__ == "__main__":
@@ -29,7 +29,7 @@ if __name__ == "__main__":
 # MAGIC create EXTERNAL table silver_chem_comp
 # MAGIC using delta LOCATION '/mnt/testblobstorage/data/silver_chem_comp'
 # MAGIC as
-# MAGIC SELECT  ex.experiment, 
+# MAGIC SELECT  ex.experiment,
 # MAGIC         m.id,
 # MAGIC         m.type,
 # MAGIC         case
@@ -46,7 +46,7 @@ if __name__ == "__main__":
 # MAGIC   FROM bronze_chem_comp m
 # MAGIC   join register_pdb_actualizer ex
 # MAGIC     on m.id_log_experiment = ex.experiment;
-# MAGIC     
+# MAGIC
 # MAGIC ------------------
 # MAGIC SELECT * FROM silver_chem_comp limit 10;
 
@@ -62,7 +62,7 @@ if __name__ == "__main__":
 # MAGIC if spark._jsparkSession.catalog().tableExists('default', 'bronze_pdbx_database_PDB_obs_spr'):
 # MAGIC     spark.sql('drop table if exists silver_pdbx_database_PDB_obs_spr;')
 # MAGIC     spark.sql('''create table silver_pdbx_database_PDB_obs_spr as
-# MAGIC                 SELECT  ex.experiment, 
+# MAGIC                 SELECT  ex.experiment,
 # MAGIC                         m.id,
 # MAGIC                         cast(m.date as date) date,
 # MAGIC                         m.pdb_id,
@@ -87,10 +87,10 @@ if __name__ == "__main__":
 # MAGIC _extra
 # MAGIC */
 # MAGIC drop table if exists silver_extra;
-# MAGIC create table silver_extra 
+# MAGIC create table silver_extra
 # MAGIC using delta LOCATION '/mnt/testblobstorage/data/silver_extra'
 # MAGIC as
-# MAGIC SELECT  ex.experiment, 
+# MAGIC SELECT  ex.experiment,
 # MAGIC         `_exptl.entry_id` as entry_id,
 # MAGIC         `_exptl.method` as method
 # MAGIC         --trim(BOTH "'" FROM `_exptl.method` ) as method
@@ -113,7 +113,7 @@ if __name__ == "__main__":
 # MAGIC */
 # MAGIC drop table if exists silver_entity_poly_seq;
 # MAGIC create table silver_entity_poly_seq as
-# MAGIC SELECT  ex.experiment, 
+# MAGIC SELECT  ex.experiment,
 # MAGIC         cast(m.entity_id as int) as entity_id,
 # MAGIC         cast(m.num as int) as num,
 # MAGIC         m.mon_id,
@@ -133,10 +133,10 @@ if __name__ == "__main__":
 
 # MAGIC %sql
 # MAGIC -- _entity
-# MAGIC 
+# MAGIC
 # MAGIC drop table if exists silver_entity;
 # MAGIC create table silver_entity as
-# MAGIC SELECT  ex.experiment, 
+# MAGIC SELECT  ex.experiment,
 # MAGIC         cast(m.id as int) as id,
 # MAGIC         m.type,
 # MAGIC         m.src_method,
@@ -154,5 +154,3 @@ if __name__ == "__main__":
 # MAGIC SELECT * FROM silver_entity limit 10;
 
 # COMMAND ----------
-
-

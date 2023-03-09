@@ -14,13 +14,13 @@ TODO:
     change data capture протестить SELECT * FROM table_change('table_name',3,4)
         describe history table_name
 '''
-from pdb_helper import read_config, task
+from pdb_helper import task
 from pyspark.sql import SparkSession
 import hashlib
 from gemmi import cif
 import time
 from datetime import datetime
-from installer import Tables_config
+from installer import Tables_config, CONFIG
 start_time = time.time()
 start_ts = datetime.now()
 
@@ -32,21 +32,18 @@ def calculate_checksum(file_path):
 
 
 @task
-def bronze(spark_context: SparkSession):
-    config = read_config()
+def bronze(spark_context: SparkSession, config: dict):
     downloads_path = config["downloads_path"]
     '''
         read file "input.txt" with experiment list to process
     '''
-    tables_config = Tables_config(spark_context=spark_context)
+    tables_config = Tables_config(spark_context=spark_context, table_describe_path=CONFIG['table_describe_path'])
 
     experiment_df = spark_context.read.table('config_pdb_actualizer')\
         .select('experiment').collect()
 
     # fields = {f'_{name}':[] for name in config["tables"]}
     extra_data = config["extra"]
-
-    df_dict = {}
 
     register_df = spark_context.sql('''select history_begin, 
                                               experiment, 
