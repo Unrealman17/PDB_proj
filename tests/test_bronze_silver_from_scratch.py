@@ -47,15 +47,17 @@ def path_list(config) -> list[str]:
         [f'bronze_{t}' for t in CONFIG["tables"]], config))
     return res
 
+
 def create_fake_table(table_path):
     table_name = table_path.split(os.sep)[-1]
     external_location = table_path[:-len(table_name)]
     DTable(name=table_name,
-                 spark_context=spark,
-                 category=None,
-                 external_location=external_location).create_table_as('SELECT 1 as a, 2 as b')
+           spark_context=spark,
+           category=None,
+           external_location=external_location).create_table_as('SELECT 1 as a, 2 as b')
 
-def test_remove(path_list:list[str], config):
+
+def test_remove(path_list: list[str], config):
 
     downloads_path = config["downloads_path"]
     for path in path_list:
@@ -68,15 +70,41 @@ def test_remove(path_list:list[str], config):
     for table in tables_config.tables():
         assert table.exist == False, f'Table {table} exists'
         external_locations.add(table.external_location)
-    assert external_locations == set(path_list), 'something happened with external locations'
+    assert external_locations == set(
+        path_list), 'something happened with external locations'
 
 # TODO: add checking state
 
 
-def test_pipeline():
-    install_run()
+def test_pipeline(config):
+    tables_config = Tables_config(
+        spark_context=spark, config=config)
+    for i in range(2):
+        install_run()
+        for table in tables_config.service_tables():
+            assert os.path.exists(
+                table.external_location), f'step {i+1}, table {table.name} does not exist'
+        for table in tables_config.bronze_tables():
+            assert os.path.exists(
+                table.external_location), f'step {i+1}, table {table.name} does not exist'
+
     silver()
+    entity_df = spark.sql(f"select * from silver_entity;").collect()
+    for table in tables_config.silver_tables():
+        assert os.path.exists(
+            table.external_location), f'table {table.name} does not exist'
+
     run_bronze()
+
+    df = spark.sql(
+        f"select checksum from register_pdb_actualizer order by checksum;").collect()
     spark.sql(f"Update register_pdb_actualizer set checksum = concat('a',checksum);")
+    df2 = spark.sql(
+        f"select checksum from register_pdb_actualizer order by checksum;").collect()
     run_bronze()
+    df3 = spark.sql(
+        f"select checksum from register_pdb_actualizer order by checksum;").collect()
+    assert df3 == df
     silver()
+    entity_df2 = spark.sql(f"select * from silver_entity;").collect()
+    assert entity_df2 == entity_df

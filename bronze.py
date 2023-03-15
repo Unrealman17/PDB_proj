@@ -37,7 +37,7 @@ def bronze(spark_context: SparkSession, config: dict):
     '''
         read file "input.txt" with experiment list to process
     '''
-    tables_config = Tables_config(spark_context=spark_context, table_describe_path=CONFIG['table_describe_path'])
+    tables_config = Tables_config(spark_context=spark_context, config=config)
 
     experiment_df = spark_context.read.table('config_pdb_actualizer')\
         .select('experiment').collect()

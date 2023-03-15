@@ -6,6 +6,17 @@ airflow users  create --role Admin --username admin --email admin --firstname ad
 airflow webserver -p 8090
 
 airflow scheduler
+
+hostname -I
+
+export PYSPARK_PYTHON=python
+export PYSPARK_DRIVER_PYTHON=~/miniconda3/envs/PDB_proj/bin/python
+
+ps -aux
+
+cd $SPARK_HOME && ./sbin/start-master.sh
+cd $SPARK_HOME && ./sbin/start-worker.sh spark://172.17.181.159:7077
+
 '''
 import os
 print(os.getcwd())

@@ -400,6 +400,10 @@ class Tables_config:
         for table in self.silver:
             yield table
 
+    def service_tables(self) -> list[DTable]:
+        for table in self.service:
+            yield table
+
     def data(self) -> list[DTable]:
         for table in self.bronze_tables():
             yield table
@@ -407,7 +411,7 @@ class Tables_config:
             yield table
 
     def tables(self) -> list[Table]:
-        for table in self.service:
+        for table in self.service_tables():
             yield table
         for table in self.data():
             yield table
