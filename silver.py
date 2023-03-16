@@ -10,9 +10,9 @@ start_ts = datetime.now()
 
 
 @task
-def silver(spark_context: SparkSession, config: dict):
+def silver(spark_session: SparkSession, config: dict):
     tables_config = Tables_config(
-        spark_context=spark_context, config=config)
+        spark_session=spark_session, config=config)
 
     for table in tables_config.silver_tables():
         table.create_or_replace()

@@ -17,6 +17,22 @@ ps -aux
 cd $SPARK_HOME && ./sbin/start-master.sh
 cd $SPARK_HOME && ./sbin/start-worker.sh spark://172.17.181.159:7077
 
+----------------------------------------------------------
+from pyspark.sql.functions import col, udf
+
+def convertCase(str):
+    return hash(str) % thread_num
+
+# Converting function to UDF
+UDF = udf(lambda z: convertCase(z), IntegerType())
+experiment_df = experiment_df.withColumn("thread", UDF(
+    col("experiment"))).collect()
+----------------------------------------------------------
+
+# using timestamp
+SELECT * FROM tableName TIMESTAMP as of "operation timestamp from history"
+# using version
+SELECT * FROM tableName VERSION as of "VERSION NUMBER"
 '''
 import os
 print(os.getcwd())

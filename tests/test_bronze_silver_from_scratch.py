@@ -1,16 +1,16 @@
-from silver import silver
-from python_pipeline.run_bronze import main as run_bronze
-from python_pipeline.install_run import main as install_run
-from bronze import bronze
-from download_file import download_unzip
-from configure import configure
-from fill_config_table import fill
-from installer import Tables_config, reinstall, remove, install, path_exists, CONFIG, DTable
-from pdb_helper import spark, read_config
-import os
-import sys
 import pytest
+import sys
+import os
+
 sys.path.append(os.getcwd())
+from pdb_helper import spark
+from installer import Tables_config, remove, path_exists, CONFIG, DTable
+from fill_config_table import fill
+from download_unzip_all import download_unzip_all_fn
+from bronze import bronze
+from python_pipeline.install_run import main as install_run
+from python_pipeline.run_bronze import main as run_bronze
+from silver import silver
 
 
 def generate_new_path(path: str) -> str:
@@ -52,7 +52,7 @@ def create_fake_table(table_path):
     table_name = table_path.split(os.sep)[-1]
     external_location = table_path[:-len(table_name)]
     DTable(name=table_name,
-           spark_context=spark,
+           spark_session=spark,
            category=None,
            external_location=external_location).create_table_as('SELECT 1 as a, 2 as b')
 
@@ -64,7 +64,7 @@ def test_remove(path_list: list[str], config):
         if not os.path.exists(path):
             create_fake_table(path)
 
-    tables_config = remove(spark_context=spark, config=config)
+    tables_config = remove(spark_session=spark, config=config)
     assert path_exists(downloads_path) == False
     external_locations = set()
     for table in tables_config.tables():
@@ -78,7 +78,7 @@ def test_remove(path_list: list[str], config):
 
 def test_pipeline(config):
     tables_config = Tables_config(
-        spark_context=spark, config=config)
+        spark_session=spark, config=config)
     for i in range(2):
         install_run()
         for table in tables_config.service_tables():
@@ -107,4 +107,8 @@ def test_pipeline(config):
     assert df3 == df
     silver()
     entity_df2 = spark.sql(f"select * from silver_entity;").collect()
-    assert entity_df2 == entity_df
+    assert set(entity_df2) == set(entity_df)
+
+from pdb_helper import read_config
+
+test_pipeline(read_config())

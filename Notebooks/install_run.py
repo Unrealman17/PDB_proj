@@ -16,7 +16,7 @@ from pdb_helper import spark, read_config
 from installer import reinstall
 from fill_config_table import fill
 from configure import configure
-from download_file import download_unzip
+from download_unzip_all import download_unzip_al
 from bronze import bronze
 from mount_storage_account import mount_storage_account
 
@@ -33,24 +33,24 @@ print('config:',json.dumps(config,indent=4))
 
 # COMMAND ----------
 
-reinstall(spark_context = spark, dbutils=dbutils)
+reinstall(spark_session = spark, dbutils=dbutils)
 
 # COMMAND ----------
 
-fill(spark_context = spark)
+fill(spark_session = spark)
 
 # COMMAND ----------
 
-configure(spark_context = spark)
+configure(spark_session = spark)
 
 # COMMAND ----------
 
 for i in range(download_thread):
-    r = download_unzip(i)
+    r = download_unzip_al(i)
 
 # COMMAND ----------
 
-bronze(spark_context = spark)
+bronze(spark_session = spark)
 
 # COMMAND ----------
 

@@ -7,19 +7,17 @@ def main():
     from installer import reinstall
     from fill_config_table import fill
     from configure import configure
-    from download_file import download_unzip
+    from download_unzip_all import download_unzip_all_fn
     from bronze import bronze
 
     config = read_config()
-    download_thread = config['download_thread']
 
-    fill(spark_context = spark)
-    configure(spark_context = spark)
+    fill(spark_session = spark)
+    configure(spark_session = spark)
 
-    for i in range(download_thread):
-        download_unzip(i)
+    download_unzip_all_fn(spark_session = spark, config = config)
 
-    bronze(spark_context = spark)
+    bronze(spark_session = spark)
 
 if __name__ == "__main__":
     main()

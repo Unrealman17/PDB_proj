@@ -32,20 +32,20 @@ def calculate_checksum(file_path):
 
 
 @task
-def bronze(spark_context: SparkSession, config: dict):
+def bronze(spark_session: SparkSession, config: dict):
     downloads_path = config["downloads_path"]
     '''
         read file "input.txt" with experiment list to process
     '''
-    tables_config = Tables_config(spark_context=spark_context, config=config)
+    tables_config = Tables_config(spark_session=spark_session, config=config)
 
-    experiment_df = spark_context.read.table('config_pdb_actualizer')\
+    experiment_df = spark_session.read.table('config_pdb_actualizer')\
         .select('experiment').collect()
 
     # fields = {f'_{name}':[] for name in config["tables"]}
     extra_data = config["extra"]
 
-    register_df = spark_context.sql('''select history_begin, 
+    register_df = spark_session.sql('''select history_begin, 
                                               experiment, 
                                               checksum 
                                             from register_pdb_actualizer;''')
@@ -101,13 +101,13 @@ def bronze(spark_context: SparkSession, config: dict):
         table.write()
 
     df_data = [[start_ts, k, v] for k, v in checksum_dict.items()]
-    spark_context.createDataFrame(df_data, schema=register_df.schema).createOrReplaceTempView(
+    spark_session.createDataFrame(df_data, schema=register_df.schema).createOrReplaceTempView(
         'tmp_register_pdb_actualizer')
     print(checksum_dict)
 
     # COMMAND ----------
 
-    spark_context.sql('''
+    spark_session.sql('''
                 MERGE INTO register_pdb_actualizer m
                 USING tmp_register_pdb_actualizer t
                 ON m.experiment = t.experiment
@@ -119,7 +119,7 @@ def bronze(spark_context: SparkSession, config: dict):
                 WHEN NOT MATCHED
                 THEN INSERT *;''')
 
-    spark_context.sql('DROP VIEW tmp_register_pdb_actualizer;')
+    spark_session.sql('DROP VIEW tmp_register_pdb_actualizer;')
 
     # переделать на регистрацию temp view
     # data_path = f"{folder_path}bronze/"
