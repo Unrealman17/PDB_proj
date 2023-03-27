@@ -38,10 +38,41 @@ import os
 print(os.getcwd())
 from pdb_helper import spark
 
+letters = set("qwertyuiopasdfghjklzxcvbnm")
+rdd = spark.sparkContext.textFile('123.txt')
+lower = rdd.map(lambda x: x.lower())
+symbols = lower.map(lambda x: set(x) - letters).reduce(lambda x,y: x | y)
+print(len(symbols))
 
+def super_split(x:str):
+    for s in symbols:
+        x = x.replace(s,' ')
+    return x.split()
+
+add = lambda x, y : x+y
+value_desc = lambda x: -x[1]
+
+words = lower.flatMap(super_split)
+kv = words.map(lambda x: (x,1))
+counted = kv.reduceByKey(add)
+res = counted.sortBy(value_desc)
+print(res.count())
+res.toDF().limit(10).show()
+
+#spark.sparkContext.parallelize(words.countByValue()).sortBy(value_desc).toDF().limit(10).show()
+
+letters = counted.flatMap(lambda x: [(l, x[1]) for l in x[0]])
+counted_letters = letters.reduceByKey(add).sortBy(value_desc)
+total = counted_letters.map(lambda x:x[1]).reduce(add)
+
+fr_letters = counted_letters.map(lambda x: (x[0],f'{round(x[1]/total*100,2)}%'))
+
+print(fr_letters.count())
+fr_letters.toDF().show(n=30)
+print()
 # spark.sql(f"DESCRIBE HISTORY register_pdb_actualizer").show()
 
-spark.sql(f"SELECT * FROM register_pdb_actualizer").show()
+# spark.sql(f"SELECT * FROM register_pdb_actualizer").show()
 #spark.sql(f"Update register_pdb_actualizer set checksum = concat('a',checksum);").show()
 #spark.sql(f"SELECT * FROM register_pdb_actualizer").show()
 
