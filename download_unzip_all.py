@@ -5,12 +5,18 @@ from pyspark.sql import SparkSession
 import urllib.request
 from multiprocessing import Pool
 
-def download_unzip(experiment: str, config: dict) -> str:
+
+def download(experiment: str, config: dict):
     downloads_path = config['downloads_path']
     url = f'{config["download_url"]}{experiment.lower()}.cif.gz'
     gz_file_name = f"{downloads_path}{experiment}.cif.gz"
-    file_name = gz_file_name[:-len('.gz')]
     urllib.request.urlretrieve(url, gz_file_name)
+    return gz_file_name
+
+
+def download_unzip(experiment: str, config: dict) -> str:
+    gz_file_name = download(experiment, config)
+    file_name = gz_file_name[:-len('.gz')]
     with gzip.open(gz_file_name, 'rb') as f_in:
         with open(file_name, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
@@ -26,8 +32,8 @@ def download_unzip_all_fn(spark_session: SparkSession, config: dict) -> str:
     res = spark_session.sql('select experiment from config_pdb_actualizer')
     res = res.rdd.map(lambda x: str(x[0]))
 
-    Pool().map(res.collect(),lambda x: download_unzip(x, config=config))
-    
+    # Pool().map(res.collect(),lambda x: download_unzip(x, config=config))
+
     res = res.map(lambda x: download_unzip(x, config=config))
     res = res.collect()
     # download_unzip('4HHB',config=config)

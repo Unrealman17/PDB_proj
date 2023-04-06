@@ -33,11 +33,81 @@ experiment_df = experiment_df.withColumn("thread", UDF(
 SELECT * FROM tableName TIMESTAMP as of "operation timestamp from history"
 # using version
 SELECT * FROM tableName VERSION as of "VERSION NUMBER"
+
+
+cd $SPARK_HOME 
+./sbin/stop-worker.sh
+./sbin/stop-master.sh
+./sbin/start-master.sh
+./sbin/start-worker.sh spark://172.18.100.81:7077
 '''
+import gzip
 import json
-from pdb_helper import spark
+from pdb_helper import spark, read_config
+from download_unzip_all import download
+from gemmi import cif
+
 import os
+
 print(os.getcwd())
+
+config = read_config()
+
+experiment_rdd = spark.sql('select experiment from config_pdb_actualizer').rdd
+experiment_rdd = experiment_rdd.map(lambda x: str(x[0]))
+gz_rdd = experiment_rdd.map(lambda x: download(x, config=config))
+categories = ["chem_comp",
+              "entity_poly_seq",
+              "pdbx_database_PDB_obs_spr",
+              "entity", "exptl"]
+
+
+def extract_from_cif(gz_file_name: str):
+    with gzip.open(gz_file_name, 'r') as f:
+        bytes = f.read()
+    block = cif.read_string(bytes.decode('ascii')).sole_block()
+    res = []
+    for category in categories:
+        cat = f'_{category}.'
+        table = block.find_mmcif_category(cat)
+        rows = [list(row) for row in table]
+        res.extend([(category, row) for row in rows])
+        header = list(table.tags)
+        res.append((f'header',header))
+    return res
+
+mixed_rdd = gz_rdd.flatMap(extract_from_cif)
+# mixed_rdd = mixed_rdd.repartition(len(categories))
+
+header_rdd = mixed_rdd.filter(lambda x: x[0] == 'header')
+mixed_rdd_without_headers = mixed_rdd.filter(lambda x: x[0] != 'header')
+
+headers = header_rdd.map(lambda x:x[1]).collect()
+schemas = {category:[] for category in categories}
+for table_header in headers:
+    for header in table_header:
+        category, h = header.split('.')
+        schemas[category[1:]].append(h)
+
+def add_schema(rdd_kv):
+    category, row = rdd_kv
+    row = { schemas[category][i]:row[i] for i in range(len(row))}
+    return (category,row)
+
+mixed_rdd_with_schema = mixed_rdd_without_headers.map(add_schema)
+
+data_rdds = {}
+for category in categories:
+    data_rdds[category] = mixed_rdd_with_schema.filter(lambda x: x[0] == category).map(lambda x:x[1])
+    if data_rdds[category].take(1):
+        data_rdds[category].toDF().show(5)
+
+# mixed_rdd.map(lambda x: {'category'    : x[0],
+#                         'data': x[1]
+#                            }).toDF().show(100)
+
+print(1)
+
 # ===== words analyze ===================================
 # letters = set("qwertyuiopasdfghjklzxcvbnm")
 # rdd = spark.sparkContext.textFile('123.txt')
@@ -75,76 +145,76 @@ print(os.getcwd())
 # ===== words analyze ===================================
 
 # ===== transactions analyze ===================================
-'''
-    1 Get the total amount spent by each user
-    2 Get the total amount spent by each user for each of their cards
-    3 Get the total amount spent by each user for each of their cards on each category
+# '''
+#     1 Get the total amount spent by each user
+#     2 Get the total amount spent by each user for each of their cards
+#     3 Get the total amount spent by each user for each of their cards on each category
 
-    4 Get the distinct list of categories in which the user has made expenditure
-    5 Get the category in which the user has made the maximum expenditure
-'''
+#     4 Get the distinct list of categories in which the user has made expenditure
+#     5 Get the category in which the user has made the maximum expenditure
+# '''
 
-rdd = spark.sparkContext.textFile('card_transactions.json').map(lambda x: json.loads(x))
-
-
-def get_category_cards_user_amount(d: dict):
-    return ((d['user_id'], d['category'], d['card_num']), d['amount'])
+# rdd = spark.sparkContext.textFile('card_transactions.json').map(lambda x: json.loads(x))
 
 
-res3 = rdd.map(get_category_cards_user_amount)\
-        .combineByKey(lambda x: x, lambda x, y: x+y, lambda x, y: x+y)\
-        .map(lambda x: {'user'    : x[0][0],  
-                        'category': x[0][1],  
-                        'card'    : x[0][2],  
-                        'amount'  : x[1]     
-                           })
-#
-res3.cache()
-
-res2 = res3.map(lambda x: ((x['user'], x['card']),x['amount']))\
-        .combineByKey(lambda x: x, lambda x, y: x+y, lambda x, y: x+y)\
-        .map(lambda x: {'user'    : x[0][0],  
-                        'card'    : x[0][1],  
-                        'amount'  : x[1]     
-                        })
-
-res1 = res2.map(lambda x: (x['user'],x['amount']))\
-        .combineByKey(lambda x: x, lambda x, y: x+y, lambda x, y: x+y)\
-        .map(lambda x: {'user'    : x[0],  
-                        'amount'  : x[1]
-                        })
+# def get_category_cards_user_amount(d: dict):
+#     return ((d['user_id'], d['category'], d['card_num']), d['amount'])
 
 
-res1.toDF().show(100)
-res2.toDF().show(100)
-res3.toDF().show(100)
-res3.unpersist()
+# res3 = rdd.map(get_category_cards_user_amount)\
+#         .combineByKey(lambda x: x, lambda x, y: x+y, lambda x, y: x+y)\
+#         .map(lambda x: {'user'    : x[0][0],
+#                         'category': x[0][1],
+#                         'card'    : x[0][2],
+#                         'amount'  : x[1]
+#                            })
+# #
+# res3.cache()
 
-res3.unpersist()
-res45 = rdd.map(lambda d: ((d['user_id'], d['category']), d['amount']))\
-            .combineByKey(lambda x: x, lambda x, y: x+y, lambda x, y: x+y)\
-            .map(lambda x: {'user'    : x[0][0],  
-                            'category': x[0][1],
-                            'amount'  : x[1]
-                            })\
-            .cache()
+# res2 = res3.map(lambda x: ((x['user'], x['card']),x['amount']))\
+#         .combineByKey(lambda x: x, lambda x, y: x+y, lambda x, y: x+y)\
+#         .map(lambda x: {'user'    : x[0][0],
+#                         'card'    : x[0][1],
+#                         'amount'  : x[1]
+#                         })
 
-res4 = res45.map(lambda d:(d['user'], d['category']))\
-        .combineByKey(lambda x: {x},lambda x,y:x | {y},lambda x,y: x | y)\
-        .map(lambda x: {'user':x[0], 'categories':', '.join(x[1])})
+# res1 = res2.map(lambda x: (x['user'],x['amount']))\
+#         .combineByKey(lambda x: x, lambda x, y: x+y, lambda x, y: x+y)\
+#         .map(lambda x: {'user'    : x[0],
+#                         'amount'  : x[1]
+#                         })
 
-res5 = res45.map(lambda d: (d['user'],(d['category'],d['amount'])))\
-        .combineByKey(lambda x: x,lambda x,y: x if x[1]>y[1] else y, lambda x,y: x if x[1]>y[1] else y)\
-        .map(lambda x: {'user':x[0], 
-                        'category':x[1][0], 
-                        'amount':x[1][1]})
 
-res4.toDF().show()
-res5.toDF().show()
+# res1.toDF().show(100)
+# res2.toDF().show(100)
+# res3.toDF().show(100)
+# res3.unpersist()
 
-res45.unpersist()
+# res3.unpersist()
+# res45 = rdd.map(lambda d: ((d['user_id'], d['category']), d['amount']))\
+#             .combineByKey(lambda x: x, lambda x, y: x+y, lambda x, y: x+y)\
+#             .map(lambda x: {'user'    : x[0][0],
+#                             'category': x[0][1],
+#                             'amount'  : x[1]
+#                             })\
+#             .cache()
 
-print(1)
+# res4 = res45.map(lambda d:(d['user'], d['category']))\
+#         .combineByKey(lambda x: {x},lambda x,y:x | {y},lambda x,y: x | y)\
+#         .map(lambda x: {'user':x[0], 'categories':', '.join(x[1])})
+
+# res5 = res45.map(lambda d: (d['user'],(d['category'],d['amount'])))\
+#         .combineByKey(lambda x: x,lambda x,y: x if x[1]>y[1] else y, lambda x,y: x if x[1]>y[1] else y)\
+#         .map(lambda x: {'user':x[0],
+#                         'category':x[1][0],
+#                         'amount':x[1][1]})
+
+# res4.toDF().show()
+# res5.toDF().show()
+
+# res45.unpersist()
+
+# print(1)
 
 # ===== transactions analyze ===================================
 
