@@ -3,7 +3,7 @@ import os
 import shutil
 from pyspark.sql import SparkSession
 import urllib.request
-
+from multiprocessing import Pool
 
 def download_unzip(experiment: str, config: dict) -> str:
     downloads_path = config['downloads_path']
@@ -25,6 +25,9 @@ def download_unzip_all_fn(spark_session: SparkSession, config: dict) -> str:
     '''
     res = spark_session.sql('select experiment from config_pdb_actualizer')
     res = res.rdd.map(lambda x: str(x[0]))
+
+    Pool().map(res.collect(),lambda x: download_unzip(x, config=config))
+    
     res = res.map(lambda x: download_unzip(x, config=config))
     res = res.collect()
     # download_unzip('4HHB',config=config)

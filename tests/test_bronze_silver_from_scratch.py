@@ -97,13 +97,13 @@ def test_pipeline(config):
     run_bronze()
 
     df = spark.sql(
-        f"select checksum from register_pdb_actualizer order by checksum;").collect()
-    spark.sql(f"Update register_pdb_actualizer set checksum = concat('a',checksum);")
+        f"SELECT checksum FROM register_pdb_actualizer ORDER BY checksum;").collect()
+    spark.sql(f"UPDATE register_pdb_actualizer SET checksum = concat('a',checksum);")
     df2 = spark.sql(
-        f"select checksum from register_pdb_actualizer order by checksum;").collect()
+        f"SELECT checksum FROM register_pdb_actualizer ORDER BY checksum;").collect()
     run_bronze()
     df3 = spark.sql(
-        f"select checksum from register_pdb_actualizer order by checksum;").collect()
+        f"SELECT checksum FROM register_pdb_actualizer ORDER BY checksum;").collect()
     assert df3 == df
     silver()
     entity_df2 = spark.sql(f"select * from silver_entity;").collect()

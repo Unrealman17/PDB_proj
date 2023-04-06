@@ -9,12 +9,10 @@
         "_exptl.entry_id",
         "_exptl.method"
     ],
-    "download_thread": 4,
-    "storage_account_mount_point": "/mnt/testblobstorage",
-    "downloads_path": "/dbfs/mnt/testblobstorage/files/",
-    "table_describe_path": "/mnt/testblobstorage/data/",
-    "external_table_path": "/mnt/testblobstorage/data/",
+    "downloads_path": "/home/e/proj/pdb_proj/downloads/",
+    "external_table_path": "/home/e/proj/pdb_proj/external/",
+    "table_describe_path": "/home/e/proj/pdb_proj/tables/",
     "buffer_size_per_table": 8192,
     "download_url": "https://files.wwpdb.org/pub/pdb/data/structures/all/mmCIF/",
-    "input_file": "input.txt"
+    "input_file":"input.txt"
 }
