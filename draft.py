@@ -34,12 +34,14 @@ SELECT * FROM tableName TIMESTAMP as of "operation timestamp from history"
 # using version
 SELECT * FROM tableName VERSION as of "VERSION NUMBER"
 
-
+export PYSPARK_PYTHON=~/miniconda3/envs/PDB_proj/bin/python
+export PYSPARK_DRIVER_PYTHON=~/miniconda3/envs/PDB_proj/bin/python
+hostname -I
 cd $SPARK_HOME 
-./sbin/stop-worker.sh
-./sbin/stop-master.sh
-./sbin/start-master.sh
-./sbin/start-worker.sh spark://172.18.100.81:7077
+cd $SPARK_HOME && ./sbin/stop-worker.sh
+cd $SPARK_HOME && ./sbin/stop-master.sh
+cd $SPARK_HOME && ./sbin/start-master.sh
+cd $SPARK_HOME && ./sbin/start-worker.sh spark://172.18.100.81:7077
 '''
 import gzip
 import json
@@ -70,10 +72,18 @@ def extract_from_cif(gz_file_name: str):
     for category in categories:
         cat = f'_{category}.'
         table = block.find_mmcif_category(cat)
+
         rows = [list(row) for row in table]
-        res.extend([(category, row) for row in rows])
         header = list(table.tags)
+
+        if rows:
+            for row in rows:
+                row.append(block.name)
+            header.append(cat+'cif_file_name')
+
+        res.extend([(category, row) for row in rows])
         res.append((f'header',header))
+
     return res
 
 mixed_rdd = gz_rdd.flatMap(extract_from_cif)
@@ -89,18 +99,34 @@ for table_header in headers:
         category, h = header.split('.')
         schemas[category[1:]].append(h)
 
+# print(json.dumps(schemas,indent=4))
+
 def add_schema(rdd_kv):
     category, row = rdd_kv
     row = { schemas[category][i]:row[i] for i in range(len(row))}
     return (category,row)
 
-mixed_rdd_with_schema = mixed_rdd_without_headers.map(add_schema)
+mixed_rdd_with_schema = mixed_rdd_without_headers.map(add_schema).cache()
 
-data_rdds = {}
+mixed_rdd_with_schema.cache()
+
+data_df = {}
+
 for category in categories:
-    data_rdds[category] = mixed_rdd_with_schema.filter(lambda x: x[0] == category).map(lambda x:x[1])
-    if data_rdds[category].take(1):
-        data_rdds[category].toDF().show(5)
+    rdd = mixed_rdd_with_schema.filter(lambda x: x[0] == category).map(lambda x:x[1])
+    if rdd.take(1):
+        df = rdd.toDF()
+        df.show(5)
+        df.createOrReplaceTempView('tmp')
+        table_name = f'bronze_{category}'
+        if spark._jsparkSession.catalog().tableExists('default', table_name):
+            pass
+        else:
+            spark.sql(f"CREATE EXTERNAL TABLE {table_name} USING delta LOCATION '{config['external_table_path']}{table_name}' AS select * from tmp")
+
+
+mixed_rdd_with_schema.unpersist()
+
 
 # mixed_rdd.map(lambda x: {'category'    : x[0],
 #                         'data': x[1]

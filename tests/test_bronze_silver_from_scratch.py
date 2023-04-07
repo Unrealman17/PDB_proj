@@ -109,6 +109,6 @@ def test_pipeline(config):
     entity_df2 = spark.sql(f"select * from silver_entity;").collect()
     assert set(entity_df2) == set(entity_df)
 
-from pdb_helper import read_config
+# from pdb_helper import read_config
 
-test_pipeline(read_config())
+# test_pipeline(read_config())
