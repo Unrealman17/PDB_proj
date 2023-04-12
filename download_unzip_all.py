@@ -10,7 +10,8 @@ def download(experiment: str, config: dict):
     downloads_path = config['downloads_path']
     url = f'{config["download_url"]}{experiment.lower()}.cif.gz'
     gz_file_name = f"{downloads_path}{experiment}.cif.gz"
-    urllib.request.urlretrieve(url, gz_file_name)
+    if not os.path.exists(gz_file_name):
+        urllib.request.urlretrieve(url, gz_file_name)
     return gz_file_name
 
 

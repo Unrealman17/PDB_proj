@@ -440,7 +440,7 @@ class Tables_config:
 @task
 def remove(spark_session: SparkSession, config: dict, dbutils=None) -> Tables_config:
     downloads_path = config['downloads_path']
-    rmdir(downloads_path, dbutils=dbutils)
+    #rmdir(downloads_path, dbutils=dbutils)
 
     tables_config = Tables_config(
         spark_session=spark_session, dbutils=dbutils, config=config)
@@ -463,8 +463,8 @@ def install(spark_session: SparkSession, config: dict, tables_config: Tables_con
 
     if tables_config.dbutils:
         tables_config.dbutils.fs.mkdirs(dbr_prepare_path(downloads_path))
-    else:
-        Path(downloads_path).mkdir(parents=True)
+    #else:
+        #Path(downloads_path).mkdir(parents=True)
 
     if not tables_config:
         tables_config = Tables_config(

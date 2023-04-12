@@ -45,88 +45,68 @@ cd $SPARK_HOME && ./sbin/start-worker.sh spark://172.18.100.81:7077
 '''
 import gzip
 import json
-from pdb_helper import spark, read_config
-from download_unzip_all import download
-from gemmi import cif
-
 import os
-
-print(os.getcwd())
-
-config = read_config()
-
-experiment_rdd = spark.sql('select experiment from config_pdb_actualizer').rdd
-experiment_rdd = experiment_rdd.map(lambda x: str(x[0]))
-gz_rdd = experiment_rdd.map(lambda x: download(x, config=config))
-categories = ["chem_comp",
-              "entity_poly_seq",
-              "pdbx_database_PDB_obs_spr",
-              "entity", "exptl"]
+import sys
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import explode, split
+from pyspark.sql.functions import col, udf
+from pyspark.sql.types import StructType, StructField, FloatType, StringType
 
 
-def extract_from_cif(gz_file_name: str):
-    with gzip.open(gz_file_name, 'r') as f:
-        bytes = f.read()
-    block = cif.read_string(bytes.decode('ascii')).sole_block()
-    res = []
-    for category in categories:
-        cat = f'_{category}.'
-        table = block.find_mmcif_category(cat)
+spark = SparkSession.builder.appName("streamApp").getOrCreate()
+spark.conf.set("spark.sql.shuffle.partitions", 1)
 
-        rows = [list(row) for row in table]
-        header = list(table.tags)
+host = '127.0.0.1'
+port = 12345
+lines = spark.readStream.format('socket').\
+    options(host=host, port=port).load()
 
-        if rows:
-            for row in rows:
-                row.append(block.name)
-            header.append(cat+'cif_file_name')
+lines.printSchema()
 
-        res.extend([(category, row) for row in rows])
-        res.append((f'header',header))
-
-    return res
-
-mixed_rdd = gz_rdd.flatMap(extract_from_cif)
-# mixed_rdd = mixed_rdd.repartition(len(categories))
-
-header_rdd = mixed_rdd.filter(lambda x: x[0] == 'header')
-mixed_rdd_without_headers = mixed_rdd.filter(lambda x: x[0] != 'header')
-
-headers = header_rdd.map(lambda x:x[1]).collect()
-schemas = {category:[] for category in categories}
-for table_header in headers:
-    for header in table_header:
-        category, h = header.split('.')
-        schemas[category[1:]].append(h)
-
-# print(json.dumps(schemas,indent=4))
-
-def add_schema(rdd_kv):
-    category, row = rdd_kv
-    row = { schemas[category][i]:row[i] for i in range(len(row))}
-    return (category,row)
-
-mixed_rdd_with_schema = mixed_rdd_without_headers.map(add_schema).cache()
-
-mixed_rdd_with_schema.cache()
-
-data_df = {}
-
-for category in categories:
-    rdd = mixed_rdd_with_schema.filter(lambda x: x[0] == category).map(lambda x:x[1])
-    if rdd.take(1):
-        df = rdd.toDF()
-        df.show(5)
-        df.createOrReplaceTempView('tmp')
-        table_name = f'bronze_{category}'
-        if spark._jsparkSession.catalog().tableExists('default', table_name):
-            pass
-        else:
-            spark.sql(f"CREATE EXTERNAL TABLE {table_name} USING delta LOCATION '{config['external_table_path']}{table_name}' AS select * from tmp")
+# comeleteOutputQuery = lines.select("value").writeStream.outputMode('append')\
+#     .format('console').start()
 
 
-mixed_rdd_with_schema.unpersist()
+def get_type_content(s):
+    try:
+        j = json.loads(s)
+        return (j['type'], j['content'])
+    except:
+        return (None, None)
 
+
+# Converting function to UDF
+UDF = udf(lambda z: get_type_content(z),
+          StructType([
+              StructField("type", StringType(), False),
+              StructField("content", StringType(), False)
+          ])
+          )
+
+type_content_df = lines.select(UDF(col("value")).alias('type_content')).select(
+    "type_content.type", "type_content.content")
+
+type_content_df.printSchema()
+
+# wc = words.groupBy("word").count()
+
+# wc.printSchema()
+types = lines.select(UDF(col("value")).alias('type_content'))\
+    .select("type_content.type", "type_content.content")
+
+clicks = types.filter(col("type")=='click').select(col('content'))
+ads = types.filter(col("type")=='ad').select(col('content'))
+
+print(1)
+clicks\
+     .writeStream.outputMode('update').foreachBatch(lambda batch_df, batch_id: batch_df.write.save(path='csv_data', format='csv', mode='append', sep='\t')).start()
+
+
+comeleteOutputQuery = ads\
+    .writeStream.outputMode('update')\
+    .format('console').start()
+
+comeleteOutputQuery.awaitTermination()
 
 # mixed_rdd.map(lambda x: {'category'    : x[0],
 #                         'data': x[1]
