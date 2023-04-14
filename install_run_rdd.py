@@ -42,6 +42,9 @@ cd $SPARK_HOME && ./sbin/stop-worker.sh
 cd $SPARK_HOME && ./sbin/stop-master.sh
 cd $SPARK_HOME && ./sbin/start-master.sh
 cd $SPARK_HOME && ./sbin/start-worker.sh spark://172.18.100.81:7077
+
+Read 426 strings
+--- rdd 19.5389244556427 seconds ---
 '''
 import gzip
 import json
@@ -102,12 +105,13 @@ mixed_rdd_without_headers = mixed_rdd.filter(lambda x: x[0] != 'header')
 mixed_rdd.cache()
 
 headers = header_rdd.map(lambda x:x[1]).collect()
-schemas = {category:[] for category in categories}
+schemas = {category:set() for category in categories}
 for table_header in headers:
     for header in table_header:
         category, h = header.split('.')
-        schemas[category[1:]].append(h)
-
+        schemas[category[1:]].add(h)
+for k in schemas.keys():
+    schemas[k] = list(schemas[k])
 # print(json.dumps(schemas,indent=4))
 
 def add_schema(rdd_kv):
@@ -126,7 +130,7 @@ for category in categories:
     rdd = mixed_rdd_with_schema.filter(lambda x: x[0] == category).map(lambda x:x[1])
     if rdd.take(1):
         df = rdd.toDF()
-        df.show(5)
+        #df.show(5)
         df.createOrReplaceTempView('tmp')
         table_name = f'bronze_{category}'
         if spark._jsparkSession.catalog().tableExists('default', table_name):
@@ -141,6 +145,7 @@ mixed_rdd_with_schema.unpersist()
 #                         'data': x[1]
 #                            }).toDF().show(100)
 
-print("--- %s seconds ---" % (time.time() - start_time))
+print("--- rdd %s seconds ---" % (time.time() - start_time))
+print()
 
 

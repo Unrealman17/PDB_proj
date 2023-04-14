@@ -43,76 +43,80 @@ cd $SPARK_HOME && ./sbin/stop-master.sh
 cd $SPARK_HOME && ./sbin/start-master.sh
 cd $SPARK_HOME && ./sbin/start-worker.sh spark://172.18.100.81:7077
 '''
-import gzip
-import json
-import os
-import sys
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import explode, split
-from pyspark.sql.functions import col, udf
-from pyspark.sql.types import StructType, StructField, FloatType, StringType
 
 
-spark = SparkSession.builder.appName("streamApp").getOrCreate()
-spark.conf.set("spark.sql.shuffle.partitions", 1)
 
-host = '127.0.0.1'
-port = 12345
-lines = spark.readStream.format('socket').\
-    options(host=host, port=port).load()
+# ===== spark streaming ===================================
+# import gzip
+# import json
+# import os
+# import sys
+# from pyspark.sql import SparkSession
+# from pyspark.sql.functions import explode, split
+# from pyspark.sql.functions import col, udf
+# from pyspark.sql.types import StructType, StructField, FloatType, StringType
 
-lines.printSchema()
 
-# comeleteOutputQuery = lines.select("value").writeStream.outputMode('append')\
+# spark = SparkSession.builder.appName("streamApp").getOrCreate()
+# spark.conf.set("spark.sql.shuffle.partitions", 1)
+
+# host = '127.0.0.1'
+# port = 12345
+# lines = spark.readStream.format('socket').\
+#     options(host=host, port=port).load()
+
+# lines.printSchema()
+
+# # comeleteOutputQuery = lines.select("value").writeStream.outputMode('append')\
+# #     .format('console').start()
+
+
+# def get_type_content(s):
+#     try:
+#         j = json.loads(s)
+#         return (j['type'], j['content'])
+#     except:
+#         return (None, None)
+
+
+# # Converting function to UDF
+# UDF = udf(lambda z: get_type_content(z),
+#           StructType([
+#               StructField("type", StringType(), False),
+#               StructField("content", StringType(), False)
+#           ])
+#           )
+
+# type_content_df = lines.select(UDF(col("value")).alias('type_content')).select(
+#     "type_content.type", "type_content.content")
+
+# type_content_df.printSchema()
+
+# # wc = words.groupBy("word").count()
+
+# # wc.printSchema()
+# types = lines.select(UDF(col("value")).alias('type_content'))\
+#     .select("type_content.type", "type_content.content")
+
+# clicks = types.filter(col("type")=='click').select(col('content'))
+# ads = types.filter(col("type")=='ad').select(col('content'))
+
+# print(1)
+# clicks\
+#      .writeStream.outputMode('update').foreachBatch(lambda batch_df, batch_id: batch_df.write.save(path='csv_data', format='csv', mode='append', sep='\t')).start()
+
+
+# comeleteOutputQuery = ads\
+#     .writeStream.outputMode('update')\
 #     .format('console').start()
 
+# comeleteOutputQuery.awaitTermination()
 
-def get_type_content(s):
-    try:
-        j = json.loads(s)
-        return (j['type'], j['content'])
-    except:
-        return (None, None)
+# # mixed_rdd.map(lambda x: {'category'    : x[0],
+# #                         'data': x[1]
+# #                            }).toDF().show(100)
 
-
-# Converting function to UDF
-UDF = udf(lambda z: get_type_content(z),
-          StructType([
-              StructField("type", StringType(), False),
-              StructField("content", StringType(), False)
-          ])
-          )
-
-type_content_df = lines.select(UDF(col("value")).alias('type_content')).select(
-    "type_content.type", "type_content.content")
-
-type_content_df.printSchema()
-
-# wc = words.groupBy("word").count()
-
-# wc.printSchema()
-types = lines.select(UDF(col("value")).alias('type_content'))\
-    .select("type_content.type", "type_content.content")
-
-clicks = types.filter(col("type")=='click').select(col('content'))
-ads = types.filter(col("type")=='ad').select(col('content'))
-
-print(1)
-clicks\
-     .writeStream.outputMode('update').foreachBatch(lambda batch_df, batch_id: batch_df.write.save(path='csv_data', format='csv', mode='append', sep='\t')).start()
-
-
-comeleteOutputQuery = ads\
-    .writeStream.outputMode('update')\
-    .format('console').start()
-
-comeleteOutputQuery.awaitTermination()
-
-# mixed_rdd.map(lambda x: {'category'    : x[0],
-#                         'data': x[1]
-#                            }).toDF().show(100)
-
-print(1)
+# print(1)
 
 # ===== words analyze ===================================
 # letters = set("qwertyuiopasdfghjklzxcvbnm")

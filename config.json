@@ -3,11 +3,10 @@
         "chem_comp",
         "entity_poly_seq",
         "pdbx_database_PDB_obs_spr",
-        "entity"
+        "entity",
+        "exptl"
     ],
     "extra": [
-        "_exptl.entry_id",
-        "_exptl.method"
     ],
     "downloads_path": "/home/e/proj/pdb_proj/downloads/",
     "external_table_path": "/home/e/proj/pdb_proj/external/",

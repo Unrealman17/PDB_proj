@@ -42,6 +42,9 @@ cd $SPARK_HOME && ./sbin/stop-worker.sh
 cd $SPARK_HOME && ./sbin/stop-master.sh
 cd $SPARK_HOME && ./sbin/start-master.sh
 cd $SPARK_HOME && ./sbin/start-worker.sh spark://172.18.100.81:7077
+
+Read 426 strings
+--- sql 31.132269382476807 seconds ---
 '''
 import gzip
 import json
@@ -52,7 +55,7 @@ from download_unzip_all import download
 from gemmi import cif
 import time
 from pyspark.sql.functions import col, udf, explode
-from pyspark.sql.types import IntegerType, StringType, ArrayType
+from pyspark.sql.types import IntegerType, StringType, ArrayType, MapType, StructField, StructType
 
 import os
 print(os.getcwd())
@@ -60,17 +63,14 @@ print(os.getcwd())
 
 config = read_config()
 
-reinstall(spark_session = spark, config = config)
+reinstall(spark_session=spark, config=config)
 
-fill(spark_session = spark, config = config)
+fill(spark_session=spark, config=config)
 start_time = time.time()
 
-experiment_df = spark.sql('select experiment from config_pdb_actualizer')
 
-
-download_udf = udf(lambda x: download(x, config=config), StringType())
-
-gz_df = experiment_df.withColumn('experiment',download_udf(col('experiment')))
+spark.udf.register("download_gz", lambda x: download(x, config=config))
+spark.sql('create or replace temp view gz_df as select download_gz(experiment) as experiment from config_pdb_actualizer')
 
 categories = ["chem_comp",
               "entity_poly_seq",
@@ -79,7 +79,10 @@ categories = ["chem_comp",
 
 
 def extract_from_cif(gz_file_name: str):
-    global categories
+    categories = ["chem_comp",
+                  "entity_poly_seq",
+                  "pdbx_database_PDB_obs_spr",
+                  "entity", "exptl"]
     with gzip.open(gz_file_name, 'r') as f:
         bytes = f.read()
     block = cif.read_string(bytes.decode('ascii')).sole_block()
@@ -97,59 +100,53 @@ def extract_from_cif(gz_file_name: str):
             header.append(cat+'cif_file_name')
 
         res.extend([(category, row) for row in rows])
-        res.append((f'header',header))
+        res.append((f'header', header))
 
     return res
 
-extract_udf = udf(lambda x: extract_from_cif(x), ArrayType(StringType()))
-mixed_df = gz_df.withColumn('experiment',extract_udf(col('experiment')))
-mixed_df = mixed_df.withColumn('experiment',explode(col('experiment')))
+
+spark.udf.register("extract_from_cif",
+                   extract_from_cif,
+                   returnType=ArrayType(
+                       StructType(
+                           [
+                               StructField('k', StringType()),
+                               StructField("data", ArrayType(
+                                   StringType()
+                               ))
+                           ]
+                       )
+                   )
+                   )
+spark.sql('create or replace temp view mixed_df_one_col as select explode(extract_from_cif(experiment)) from gz_df')
+spark.sql("create or replace temp view mixed_df as select col.k,col.data from mixed_df_one_col")
 
 
-header_rdd = mixed_rdd.filter(lambda x: x[0] == 'header')
-mixed_rdd_without_headers = mixed_rdd.filter(lambda x: x[0] != 'header')
-mixed_rdd.cache()
+header_df = spark.sql("SELECT distinct data FROM mixed_df where k = 'header'")
+spark.sql("create or replace temp view mixed_rdd_without_headers as SELECT k, data FROM mixed_df where k != 'header'")
 
-headers = header_rdd.map(lambda x:x[1]).collect()
-schemas = {category:[] for category in categories}
+
+headers = header_df.rdd.map(lambda x: x[0]).collect()
+schemas = {category:set() for category in categories}
 for table_header in headers:
     for header in table_header:
         category, h = header.split('.')
-        schemas[category[1:]].append(h)
-
-# print(json.dumps(schemas,indent=4))
-
-def add_schema(rdd_kv):
-    category, row = rdd_kv
-    row = { schemas[category][i]:row[i] for i in range(len(row))}
-    return (category,row)
-
-mixed_rdd_with_schema = mixed_rdd_without_headers.map(add_schema).cache()
-
-mixed_rdd.unpersist()
-mixed_rdd_with_schema.cache()
+        schemas[category[1:]].add(h)
+for k in schemas.keys():
+    schemas[k] = list(schemas[k])
 
 data_df = {}
 
 for category in categories:
-    rdd = mixed_rdd_with_schema.filter(lambda x: x[0] == category).map(lambda x:x[1])
-    if rdd.take(1):
-        df = rdd.toDF()
-        df.show(5)
-        df.createOrReplaceTempView('tmp')
-        table_name = f'bronze_{category}'
-        if spark._jsparkSession.catalog().tableExists('default', table_name):
-            pass
-        else:
-            spark.sql(f"CREATE EXTERNAL TABLE {table_name} USING delta LOCATION '{config['external_table_path']}{table_name}' AS select * from tmp")
-
-mixed_rdd_with_schema.unpersist()
+    columns = [f'data[{i}] as {x}' for i, x in enumerate(schemas[category])]
+    columns = ', '.join(columns)
+    table_name = f'bronze_{category}'
+    if columns:
+        query = f"CREATE EXTERNAL TABLE {table_name} USING delta LOCATION '{config['external_table_path']}{table_name}' AS \
+            select {columns} \
+                from mixed_rdd_without_headers where k = '{category}'"
+        spark.sql(query)    
 
 
-# mixed_rdd.map(lambda x: {'category'    : x[0],
-#                         'data': x[1]
-#                            }).toDF().show(100)
 
-print("--- %s seconds ---" % (time.time() - start_time))
-
-
+print("--- sql %s seconds ---" % (time.time() - start_time))
